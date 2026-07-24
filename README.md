@@ -1,8 +1,9 @@
 # go-check-it
 
-`go-check-it` is a standalone CRAP metric tool for Go projects, a port of
+`go-check-it` is a standalone CRAP metric tool for Go projects, inspired by
+[`crap4go`](https://github.com/unclebob/crap4go) and
 [`crap4java`](https://github.com/unclebob/crap4java) (itself modeled after
-`crap4clj`) to idiomatic Go.
+`crap4clj`), implemented in idiomatic Go.
 
 It combines per-function cyclomatic complexity with `go test` coverage and
 reports CRAP scores. On each run it generates a coverage profile via `go
