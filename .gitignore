@@ -1,0 +1,4 @@
+/go-check-it
+/bin/
+*.out
+*.test

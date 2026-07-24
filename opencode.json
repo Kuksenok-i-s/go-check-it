@@ -1,0 +1,34 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama (local)",
+      "options": {
+        "baseURL": "http://localhost:11434/v1"
+      },
+      "models": {
+        "go-check-it-local": {
+          "name": "go-check-it-local (64K)",
+          "limit": {
+            "context": 65536,
+            "output": 8192
+          }
+        }
+      }
+    }
+  },
+  "agent": {
+    "build": {
+      "permission": {
+        "task": {
+          "*": "ask",
+          "local-lint-diagnosis": "allow",
+          "local-go-test-designer": "allow",
+          "local-crap-refactor": "allow",
+          "local-patch-review": "allow"
+        }
+      }
+    }
+  }
+}

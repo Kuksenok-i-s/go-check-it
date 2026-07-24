@@ -1,0 +1,68 @@
+# golangci-lint v2 configuration.
+#
+# Beyond `gofmt`/`go vet` (already clean), this enables a curated,
+# low-noise set of linters chosen to reinforce the official Go guidelines
+# this project follows (see README.md "Official Go Guidance Applied"):
+#   - errorlint / contextcheck: Go 1.13+ error wrapping and context
+#     propagation (go.dev/wiki/CodeReviewComments#contexts)
+#   - godot: doc comments should be full sentences ending in a period
+#     (go.dev/wiki/CodeReviewComments#comment-sentences)
+#   - revive / gocritic: general style and correctness, the maintained
+#     successor to the now-archived golint
+#
+# Run locally with: golangci-lint run
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - contextcheck
+    - errorlint
+    - godot
+    - goconst
+    - gocritic
+    - misspell
+    - noctx
+    - nolintlint
+    - revive
+    - unconvert
+    - unparam
+    - whitespace
+  settings:
+    revive:
+      rules:
+        - name: error-strings
+        - name: error-naming
+        - name: indent-error-flow
+        - name: receiver-naming
+        - name: var-naming
+    godot:
+      scope: declarations
+    errcheck:
+      # Writes to the CLI's own stdout/stderr and best-effort cleanup of a
+      # temp file/handle are not actionable failures worth handling per call
+      # site; see the "Handle Errors" discussion in README.md.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintln
+        - fmt.Fprintf
+        - os.Remove
+        - (*os.File).Close
+  exclusions:
+    rules:
+      # CLI flag strings (e.g. "--changed") naturally repeat across a
+      # production parse site and many test cases; that's expected, not a
+      # magic-string bug. Subprocess calls in test setup helpers don't need
+      # cancellation semantics the way the tool's own subprocess calls do.
+      - path: _test\.go
+        linters:
+          - goconst
+          - noctx
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
