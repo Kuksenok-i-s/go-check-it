@@ -4,6 +4,10 @@
 # Every supported IDE (Cursor, VS Code, Claude Code, Codex, OpenCode) should
 # call this script instead of configuring a native Ollama provider. It only
 # invokes allowlisted read-only agents and never applies edits.
+#
+# Runs in the caller's working directory (the project under review). Agents are
+# discovered from that project or from the user OpenCode config
+# (~/.config/opencode/agents/). Install with: sh scripts/install-path.sh
 
 set -euo pipefail
 
@@ -16,7 +20,7 @@ ALLOWED_ROLES=(
 
 usage() {
 	cat <<'EOF' >&2
-usage: sh scripts/run-local-subagent.sh <role> [--file PATH] [--] [prompt...]
+usage: run-local-subagent <role> [--file PATH] [--] [prompt...]
 
 Roles:
   local-lint-diagnosis
@@ -30,12 +34,18 @@ Options:
 
 Environment:
   OPENCODE_BIN  Override the OpenCode executable path
+
+Install on PATH (once):
+  sh scripts/install-path.sh
 EOF
 	exit 2
 }
 
 role=${1:-}
 [[ -n "$role" ]] || usage
+if [[ "$role" == "-h" || "$role" == "--help" ]]; then
+	usage
+fi
 shift
 
 allowed=0
@@ -86,10 +96,6 @@ for f in "${files[@]+"${files[@]}"}"; do
 	fi
 done
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-repo_root=$(dirname -- "$script_dir")
-cd "$repo_root"
-
 resolve_opencode() {
 	if [[ -n "${OPENCODE_BIN:-}" ]]; then
 		echo "$OPENCODE_BIN"
@@ -108,7 +114,7 @@ resolve_opencode() {
 
 if ! bin=$(resolve_opencode); then
 	echo "OpenCode is required but was not found on PATH" >&2
-	echo "Run: sh scripts/setup-opencode.sh --install" >&2
+	echo "Run: setup-opencode --install" >&2
 	echo "Docs: https://opencode.ai/docs/" >&2
 	exit 1
 fi
@@ -132,4 +138,5 @@ if [[ -n "$prompt" ]]; then
 fi
 
 # Intentionally omit --auto: permissions stay deny-by-default on subagents.
+# Stay in the caller's cwd so OpenCode sees the project under review.
 exec "${cmd[@]}"

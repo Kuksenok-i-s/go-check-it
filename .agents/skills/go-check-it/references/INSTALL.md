@@ -2,8 +2,13 @@
 
 The skill and the `go-check-it` executable are separate:
 
-1. install the executable;
+1. install the executable globally (once per machine);
 2. expose the skill directory to your agent.
+
+`go-check-it` is a host tool. Consumer repositories must not vendor, copy, or
+port `cmd/go-check-it` / `cmd/crap4go` into their own trees. Agents that find
+the binary missing should install or request installation — never recreate the
+tool inside the project under review.
 
 ## Install go-check-it
 
@@ -19,8 +24,9 @@ Ensure `$(go env GOPATH)/bin` (or `GOBIN`) is on `PATH`, then verify:
 go-check-it --help
 ```
 
-When developing this repository, the skill builds `./cmd/go-check-it` directly and
-does not require a global installation.
+When developing this repository, `scripts/check.sh` builds `./cmd/go-check-it`
+so changes under test are exercised. Other Go projects must use only the
+global binary on `PATH` — never a vendored `cmd/go-check-it` or `cmd/crap4go`.
 
 ## Repository scope
 
@@ -75,10 +81,17 @@ Local-model help for small diagnostics is shared across Cursor, VS Code,
 Claude Code, Codex, and OpenCode through OpenCode + Ollama. Primary IDE models
 stay unchanged.
 
+Install the bridge on `PATH` once, then use it from any project:
+
 ```sh
-sh scripts/setup-opencode.sh
-sh scripts/run-local-subagent.sh local-lint-diagnosis -- "diagnose the first failing check"
+sh scripts/install-path.sh
+setup-opencode
+run-local-subagent local-lint-diagnosis -- "diagnose the first failing check"
 ```
+
+`install-path.sh` places `run-local-subagent` and `setup-opencode` in
+`~/.local/bin`, copies the `local-*` agents into `~/.config/opencode/agents/`,
+and merges `ollama/go-check-it-local` into the user OpenCode config.
 
 See [OPENCODE.md](OPENCODE.md) for model selection, the 64K alias, roles, and
 trust boundaries.

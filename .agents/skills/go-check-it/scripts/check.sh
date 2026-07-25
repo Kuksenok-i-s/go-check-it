@@ -31,15 +31,29 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [[ -d cmd/go-check-it ]]; then
+# Prefer a local build only inside the go-check-it source repo (dogfood).
+# Everywhere else, use the installed binary. Never treat a vendored copy in a
+# consumer repo as intentional.
+is_go_check_it_source=0
+if [[ -f go.mod ]] && grep -qx 'module go-check-it' go.mod; then
+	is_go_check_it_source=1
+fi
+
+if [[ "$is_go_check_it_source" -eq 1 && -d cmd/go-check-it ]]; then
 	tmpdir=$(mktemp -d)
 	go build -o "$tmpdir/go-check-it" ./cmd/go-check-it
 	go_check_it_bin="$tmpdir/go-check-it"
 elif command -v go-check-it >/dev/null 2>&1; then
 	go_check_it_bin=$(command -v go-check-it)
+elif [[ -d cmd/go-check-it ]]; then
+	echo "found cmd/go-check-it outside the go-check-it source repository" >&2
+	echo "remove that tree and install go-check-it globally instead" >&2
+	echo "see references/INSTALL.md" >&2
+	exit 1
 else
 	echo "go-check-it is required but was not found on PATH" >&2
 	echo "install it as described in references/INSTALL.md" >&2
+	echo "do not copy or port go-check-it into this repository" >&2
 	exit 1
 fi
 

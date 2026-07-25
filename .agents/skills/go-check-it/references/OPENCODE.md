@@ -8,21 +8,22 @@ without changing each IDE's primary model.
 
 1. Install and start [Ollama](https://docs.ollama.com/linux).
 2. Pull any local model you already trust (this project never auto-pulls).
-3. From the repository root:
+3. From a go-check-it checkout, install host tools on `PATH` and OpenCode agents:
 
 ```sh
-sh scripts/setup-opencode.sh
+sh scripts/install-path.sh
+setup-opencode
 ```
 
-The script lists installed models (or uses `GO_CHECK_IT_LOCAL_MODEL`), then
+`setup-opencode` lists installed models (or uses `GO_CHECK_IT_LOCAL_MODEL`), then
 creates/updates the stable alias `go-check-it-local` with `num_ctx 65536`.
 OpenCode documents a 64K minimum context for repository work.
 
 Optional:
 
 ```sh
-sh scripts/setup-opencode.sh --check     # non-mutating preflight
-sh scripts/setup-opencode.sh --install   # ollama launch opencode
+setup-opencode --check     # non-mutating preflight
+setup-opencode --install   # ollama launch opencode
 ```
 
 `--install` may offer to install OpenCode through Ollama. It never installs
@@ -40,10 +41,10 @@ context window comes from the Ollama alias parameter.
 
 ## Cross-IDE bridge
 
-Every IDE should call:
+Every IDE should call (from any project directory):
 
 ```sh
-sh scripts/run-local-subagent.sh <role> --file /tmp/context.txt -- "your question"
+run-local-subagent <role> --file /tmp/context.txt -- "your question"
 ```
 
 Allowlisted roles:
@@ -60,7 +61,8 @@ The bridge:
 - runs `opencode run --agent <role> --model ollama/go-check-it-local`;
 - refuses unknown roles;
 - never passes `--auto`;
-- never applies edits (subagents are deny-by-default for write/network/task).
+- never applies edits (subagents are deny-by-default for write/network/task);
+- stays in the caller's working directory (the project under review).
 
 Inside OpenCode you can also invoke them manually:
 
@@ -73,9 +75,9 @@ Inside OpenCode you can also invoke them manually:
 
 ## Delegation loop
 
-1. Run the deterministic gate: `bash .agents/skills/go-check-it/scripts/check.sh`.
+1. Run the deterministic gate: `bash <skill-dir>/scripts/check.sh`.
 2. On the first failure, extract only that diagnostic and nearby code.
-3. Call `scripts/run-local-subagent.sh` with one role and that bounded context.
+3. Call `run-local-subagent` with one role and that bounded context.
 4. Apply any accepted change in the primary IDE agent.
 5. Rerun the full gate before declaring success.
 
@@ -86,7 +88,7 @@ repository to the local model.
 
 Local subagents may read code and run narrowly allowlisted diagnostic
 commands. Agent files use `mode: all` so they can be invoked both through
-`scripts/run-local-subagent.sh` / `opencode run --agent` and via `@name`
+`run-local-subagent` / `opencode run --agent` and via `@name`
 inside OpenCode. They must not:
 
 - edit files;

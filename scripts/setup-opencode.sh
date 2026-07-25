@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
 			;;
 		-h | --help)
 			cat <<'EOF'
-usage: sh scripts/setup-opencode.sh [--check|--install]
+usage: setup-opencode [--check|--install]
 
   (default)  Select an installed Ollama model and create/update go-check-it-local
              with a 64K context window for OpenCode subagents.
@@ -35,6 +35,9 @@ usage: sh scripts/setup-opencode.sh [--check|--install]
 Environment:
   GO_CHECK_IT_LOCAL_MODEL   Skip interactive selection; use this installed model.
   OLLAMA_HOST               Ollama API base (default http://localhost:11434).
+
+Install on PATH (once):
+  sh scripts/install-path.sh
 EOF
 			exit 0
 			;;
@@ -191,7 +194,7 @@ EOF
 
 check_alias() {
 	if ! model_installed "$ALIAS_NAME"; then
-		echo "Alias ${ALIAS_NAME} is not installed. Run: sh scripts/setup-opencode.sh" >&2
+		echo "Alias ${ALIAS_NAME} is not installed. Run: setup-opencode" >&2
 		return 1
 	fi
 	echo "Alias ${ALIAS_NAME} is present"
@@ -204,7 +207,7 @@ check_opencode() {
 		return 0
 	fi
 	echo "OpenCode is not on PATH" >&2
-	echo "Install: https://opencode.ai/docs/  or run: sh scripts/setup-opencode.sh --install" >&2
+	echo "Install: https://opencode.ai/docs/  or run: setup-opencode --install" >&2
 	return 1
 }
 

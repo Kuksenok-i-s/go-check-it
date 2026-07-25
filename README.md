@@ -99,17 +99,20 @@ Focused local-model help uses a shared OpenCode bridge. No IDE-specific Ollama
 provider or primary-model override is required.
 
 ```sh
-# 1) Select an already-installed Ollama model and create go-check-it-local (64K)
-sh scripts/setup-opencode.sh
+# 1) Install host tools on PATH + OpenCode agents (once per machine)
+sh scripts/install-path.sh
 
-# 2) Optional: launch / install OpenCode via Ollama (never installs Cursor)
-sh scripts/setup-opencode.sh --install
+# 2) Select an already-installed Ollama model and create go-check-it-local (64K)
+setup-opencode
 
-# 3) From any IDE agent, delegate one bounded task:
-sh scripts/run-local-subagent.sh local-lint-diagnosis --file /tmp/diag.txt -- "smallest fix?"
-sh scripts/run-local-subagent.sh local-go-test-designer --file internal/cliapp/args.go -- "tests for ParseArgs"
-sh scripts/run-local-subagent.sh local-crap-refactor -- "reduce CRAP for the top function"
-sh scripts/run-local-subagent.sh local-patch-review -- "review the current unstaged patch"
+# 3) Optional: launch / install OpenCode via Ollama (never installs Cursor)
+setup-opencode --install
+
+# 4) From any IDE agent, in any project, delegate one bounded task:
+run-local-subagent local-lint-diagnosis --file /tmp/diag.txt -- "smallest fix?"
+run-local-subagent local-go-test-designer --file internal/cliapp/args.go -- "tests for ParseArgs"
+run-local-subagent local-crap-refactor -- "reduce CRAP for the top function"
+run-local-subagent local-patch-review -- "review the current unstaged patch"
 ```
 
 Inside OpenCode you can also use `@local-lint-diagnosis`, `@local-go-test-designer`,
@@ -132,7 +135,15 @@ sh scripts/install-agent-skill.sh codex
 The installer refuses to overwrite an existing installation. Add `--force` to
 replace only the existing `go-check-it` skill directory.
 
-Install the executable separately from this checkout:
+Install PATH tools and OpenCode agents (required for local-subagent delegation
+from other repositories):
+
+```sh
+sh scripts/install-path.sh
+```
+
+Install the executable separately from this checkout (required for other
+projects; do not vendor this tool into them):
 
 ```sh
 go install ./cmd/go-check-it
