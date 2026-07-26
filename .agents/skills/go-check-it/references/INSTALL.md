@@ -87,14 +87,17 @@ Install the bridge on `PATH` once, then use it from any project:
 sh scripts/install-path.sh
 setup-opencode
 run-local-subagent local-lint-diagnosis -- "diagnose the first failing check"
+# optional parallel scouts for independent project aspects:
+# run-local-swarm --manifest /tmp/swarm-manifest.json --max-workers 2
 ```
 
-`install-path.sh` places `run-local-subagent` and `setup-opencode` in
-`~/.local/bin`, copies the `local-*` agents into `~/.config/opencode/agents/`,
-and merges `ollama/go-check-it-local` into the user OpenCode config.
+`install-path.sh` places `run-local-subagent`, `run-local-swarm`, and
+`setup-opencode` in `~/.local/bin`, copies the `local-*` agents into
+`~/.config/opencode/agents/`, and merges `ollama/go-check-it-local` into the
+user OpenCode config.
 
-See [OPENCODE.md](OPENCODE.md) for model selection, the 64K alias, roles, and
-trust boundaries.
+See [OPENCODE.md](OPENCODE.md) for model selection, the 64K alias, roles,
+optional swarm, and trust boundaries.
 
 ## Official references
 

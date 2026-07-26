@@ -16,6 +16,7 @@ ALLOWED_ROLES=(
 	local-go-test-designer
 	local-crap-refactor
 	local-patch-review
+	local-project-scout
 )
 
 usage() {
@@ -27,6 +28,7 @@ Roles:
   local-go-test-designer
   local-crap-refactor
   local-patch-review
+  local-project-scout
 
 Options:
   --file PATH   Attach a context file (diagnostic dump, function excerpt, etc.)

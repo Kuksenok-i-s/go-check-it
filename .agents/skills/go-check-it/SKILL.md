@@ -132,6 +132,7 @@ run-local-subagent local-lint-diagnosis --file /tmp/diag.txt -- "explain and pro
 run-local-subagent local-go-test-designer --file /tmp/fn.go -- "design focused table-driven tests"
 run-local-subagent local-crap-refactor --file /tmp/fn.go -- "suggest a bounded CRAP reduction"
 run-local-subagent local-patch-review -- "review the current unstaged patch"
+run-local-subagent local-project-scout -- "scout concurrency paths only"
 ```
 
 If `run-local-subagent` is missing from `PATH`, skip local delegation and say
@@ -139,11 +140,28 @@ so. Do not copy these scripts into the repository under review.
 
 Rules:
 
-1. Delegate only one isolated failure or function at a time.
+1. Delegate only one isolated failure or function at a time (fix loops).
 2. Keep the primary IDE model unchanged; the bridge pins `ollama/go-check-it-local`.
 3. Apply accepted changes yourself (or with the primary agent). Local subagents
    are read-only.
 4. Rerun `scripts/check.sh` after every applied change.
+
+### Optional swarm for independent project scouting
+
+When you need **3+ orthogonal** read-only looks (entry points, concurrency,
+permissions, tests/docs) and Ollama can run in parallel, use the opt-in
+orchestrator instead of serial scouts:
+
+```sh
+run-local-swarm --manifest /tmp/swarm-manifest.json --max-workers 2
+```
+
+Write a small JSON manifest of allowlisted roles (usually `local-project-scout`)
+with distinct prompts/shards. Default workers is 2 (hard max 4). Synthesize the
+JSON envelope yourself; never auto-apply swarm output. Skip swarm for a single
+cross-cutting bug, tiny repos, or when Ollama is already memory-bound (64K
+context × workers). Details and an example manifest:
+[OPENCODE.md](references/OPENCODE.md).
 
 If the bridge is unavailable, continue with the deterministic gates above and
 report that local delegation was skipped. Setup details are in

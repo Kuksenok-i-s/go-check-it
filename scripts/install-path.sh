@@ -21,6 +21,7 @@ usage: sh scripts/install-path.sh [--force]
 
   Installs:
     ~/.local/bin/run-local-subagent
+    ~/.local/bin/run-local-swarm
     ~/.local/bin/setup-opencode
     ~/.config/opencode/agents/local-*.md
   Merges the ollama/go-check-it-local model into ~/.config/opencode/opencode.json
@@ -72,13 +73,15 @@ install_link() {
 }
 
 install_link "$script_dir/run-local-subagent.sh" "$bin_dir/run-local-subagent"
+install_link "$script_dir/run-local-swarm.py" "$bin_dir/run-local-swarm"
 install_link "$script_dir/setup-opencode.sh" "$bin_dir/setup-opencode"
 
 for agent in \
 	local-lint-diagnosis \
 	local-go-test-designer \
 	local-crap-refactor \
-	local-patch-review
+	local-patch-review \
+	local-project-scout
 do
 	src="$repo_root/.opencode/agents/$agent.md"
 	dest="$agents_dir/$agent.md"
@@ -128,9 +131,10 @@ PY
 case ":$PATH:" in
 	*":$bin_dir:"*) ;;
 	*)
-		echo "note: $bin_dir is not on PATH; add it to use run-local-subagent and setup-opencode" >&2
+		echo "note: $bin_dir is not on PATH; add it to use run-local-subagent, run-local-swarm, and setup-opencode" >&2
 		;;
 esac
 
 echo "PATH tools ready. Create the Ollama alias with: setup-opencode"
 echo "Verify: command -v run-local-subagent && run-local-subagent --help"
+echo "Verify: command -v run-local-swarm && run-local-swarm --help"

@@ -55,6 +55,7 @@ Allowlisted roles:
 | `local-go-test-designer` | Propose focused table-driven tests |
 | `local-crap-refactor` | Suggest a bounded CRAP/complexity fix |
 | `local-patch-review` | Review the current git patch |
+| `local-project-scout` | Scout a bounded aspect/shard; structured facts only |
 
 The bridge:
 
@@ -71,18 +72,80 @@ Inside OpenCode you can also invoke them manually:
 @local-go-test-designer design tests for ParseArgs
 @local-crap-refactor analyze the highest-CRAP function
 @local-patch-review review the current unstaged patch
+@local-project-scout scout concurrency and cancellation paths
 ```
+
+## Optional swarm (bounded parallel scouts)
+
+When **three or more independent** analysis areas exist (for example entry
+points, concurrency, security/permissions, tests/docs), you may fan out with
+`run-local-swarm` instead of sequential single-role calls. This is **opt-in**.
+
+```sh
+cat >/tmp/swarm-manifest.json <<'EOF'
+{
+  "tasks": [
+    {
+      "id": "entry",
+      "role": "local-project-scout",
+      "prompt": "Scout CLI/agent entry points only; list paths and symbols."
+    },
+    {
+      "id": "concurrency",
+      "role": "local-project-scout",
+      "prompt": "Scout concurrency and cancellation; ignore unrelated packages."
+    },
+    {
+      "id": "trust",
+      "role": "local-project-scout",
+      "prompt": "Scout permissions, allowlists, and trust boundaries only."
+    }
+  ]
+}
+EOF
+
+run-local-swarm --manifest /tmp/swarm-manifest.json --max-workers 2
+```
+
+Flags:
+
+- `--max-workers` default `2`, hard max `4`
+- `--task-timeout` default `120` seconds
+- `--total-timeout` default `300` seconds
+
+The swarm prints one JSON envelope with results in manifest order. Exit `0`
+only when every task succeeds; `1` means partial failure/timeout; `2` means
+invalid input. The primary IDE agent synthesizes the envelope and owns all
+edits. There is no automatic semantic merge and no invented token budget.
+
+### When swarm is worth it
+
+Use it when:
+
+- you have **3+ orthogonal** shards (distinct packages or concerns);
+- Ollama can actually run requests in parallel on your machine;
+- wall-clock matters more than a single deep pass.
+
+Skip it when:
+
+- the question is one cross-cutting failure (prefer one strong sequential agent);
+- the repository is small enough for a single scout;
+- `ollama ps` / memory pressure shows requests queuing (64K context × workers
+  multiplies KV-cache use). Start at `--max-workers 2` and raise only after
+  checking memory and elapsed time.
 
 ## Delegation loop
 
 1. Run the deterministic gate: `bash <skill-dir>/scripts/check.sh`.
 2. On the first failure, extract only that diagnostic and nearby code.
-3. Call `run-local-subagent` with one role and that bounded context.
+3. Call `run-local-subagent` with one role and that bounded context
+   (or `run-local-swarm` for independent scouts).
 4. Apply any accepted change in the primary IDE agent.
 5. Rerun the full gate before declaring success.
 
-Delegate one isolated failure or function at a time. Do not send the whole
-repository to the local model.
+Delegate one isolated failure or function at a time for fix loops. For
+project scouting, keep each swarm task to a named shard — do not send the
+whole repository to every worker.
 
 ## Trust boundary
 
@@ -97,7 +160,8 @@ inside OpenCode. They must not:
 - recursively spawn other agents;
 - decide the project is clean without a fresh gate run.
 
-The primary IDE agent owns all edits and final verification.
+The primary IDE agent owns all edits and final verification. `run-local-swarm`
+only orchestrates allowlisted leaf calls; it never widens permissions.
 
 ## Official references
 

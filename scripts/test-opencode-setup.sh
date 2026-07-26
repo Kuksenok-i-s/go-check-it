@@ -121,13 +121,20 @@ assert "model" not in cfg, "primary model must remain unset"
 assert "go-check-it-local" in cfg["provider"]["ollama"]["models"]
 assert cfg["provider"]["ollama"]["models"]["go-check-it-local"]["limit"]["context"] == 65536
 agents=cfg["agent"]["build"]["permission"]["task"]
-for role in ("local-lint-diagnosis","local-go-test-designer","local-crap-refactor","local-patch-review"):
+for role in ("local-lint-diagnosis","local-go-test-designer","local-crap-refactor","local-patch-review","local-project-scout"):
     assert agents[role] == "allow"
 assert agents["*"] == "ask"
 PY
 
-for agent in local-lint-diagnosis local-go-test-designer local-crap-refactor local-patch-review; do
+for agent in local-lint-diagnosis local-go-test-designer local-crap-refactor local-patch-review local-project-scout; do
 	test -f "$repo_root/.opencode/agents/${agent}.md"
 done
+
+# --- scout role is allowlisted by the bridge ---
+rm -f "$FAKE_STATE/opencode.args"
+bash "$repo_root/scripts/run-local-subagent.sh" local-project-scout -- "scout entry points" >/dev/null
+joined=$(tr '\n' ' ' <"$FAKE_STATE/opencode.args")
+[[ "$joined" == *"run --agent local-project-scout --format json --model ollama/go-check-it-local scout entry points "* ]]
+[[ "$joined" != *"--auto"* ]]
 
 echo "opencode fake validation passed"

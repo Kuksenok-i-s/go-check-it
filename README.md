@@ -113,11 +113,31 @@ run-local-subagent local-lint-diagnosis --file /tmp/diag.txt -- "smallest fix?"
 run-local-subagent local-go-test-designer --file internal/cliapp/args.go -- "tests for ParseArgs"
 run-local-subagent local-crap-refactor -- "reduce CRAP for the top function"
 run-local-subagent local-patch-review -- "review the current unstaged patch"
+run-local-subagent local-project-scout -- "scout entry points only"
+
+# 5) Optional: fan out independent scouts (opt-in; default 2 workers, hard max 4)
+#    Useful for 3+ orthogonal areas; skip for one cross-cutting bug or tiny repos.
+cat >/tmp/swarm-manifest.json <<'EOF'
+{
+  "tasks": [
+    {"id": "entry", "role": "local-project-scout", "prompt": "Scout CLI entry points only."},
+    {"id": "concurrency", "role": "local-project-scout", "prompt": "Scout concurrency only."},
+    {"id": "trust", "role": "local-project-scout", "prompt": "Scout permissions/allowlists only."}
+  ]
+}
+EOF
+run-local-swarm --manifest /tmp/swarm-manifest.json --max-workers 2
 ```
 
 Inside OpenCode you can also use `@local-lint-diagnosis`, `@local-go-test-designer`,
-`@local-crap-refactor`, or `@local-patch-review`. Local subagents are read-only;
-the primary IDE agent applies edits and must rerun `scripts/check.sh`.
+`@local-crap-refactor`, `@local-patch-review`, or `@local-project-scout`. Local
+subagents are read-only; the primary IDE agent applies edits and must rerun
+`scripts/check.sh`. `run-local-swarm` only orchestrates allowlisted leaf calls
+and returns an ordered JSON envelope for the primary agent to synthesize.
+
+Note: the `go-check-it-local` alias uses a 64K context; parallel workers multiply
+KV-cache memory. Start with `--max-workers 2` and raise only after checking
+`ollama ps` and wall-clock time.
 
 Details: [OPENCODE.md](.agents/skills/go-check-it/references/OPENCODE.md).
 
