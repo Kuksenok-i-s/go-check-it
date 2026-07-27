@@ -26,5 +26,10 @@ coverage, and a small behavior-preserving refactoring sequence. Prefer
 extraction, simplified control flow, and meaningful tests. Do not add
 superficial tests solely to manipulate the score.
 
+Extracted helpers stay unexported in the caller's own package (a same-package
+helpers.go file is enough); do not propose a new package for a single
+extracted helper. Only suggest a shared helper package when the logic is
+already reused across two or more otherwise-unrelated packages.
+
 Never edit files or claim that a suggestion was validated unless a permitted
 command was actually run.

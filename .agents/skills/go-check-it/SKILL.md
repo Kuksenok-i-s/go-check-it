@@ -91,9 +91,8 @@ Treat these outcomes as failures to fix:
 - exit `3`: one or more Go practice findings were reported;
 - exit `1`: usage, tooling, cancellation, or coverage infrastructure failed.
 
-For high CRAP, prefer focused tests that increase meaningful branch coverage,
-or split genuinely multi-purpose functions. Do not add superficial tests solely
-to manipulate the score.
+For high CRAP, fix it with tests or same-package helpers, never a new package
+per helper — strict rules and an example: [REFACTORING.md](references/REFACTORING.md).
 
 For practice findings, follow the explanation in JSON. Read
 [the rule catalog](references/RULES.md) only when the tool is unavailable or
@@ -122,54 +121,31 @@ The final handoff must state:
 
 ## 6. Optional local-model delegation (OpenCode + Ollama)
 
-When a single diagnostic or function is hard to fix by hand, and Ollama plus
-OpenCode are configured, delegate through the shared bridge — not through an
-IDE-specific model provider. Require these commands on `PATH` (install once
-with `sh scripts/install-path.sh` from a go-check-it checkout):
+If a single diagnostic or function is hard to fix by hand and `run-local-subagent`
+is on `PATH`, delegate one bounded task through the shared bridge instead of
+an IDE-specific model provider:
 
 ```sh
-run-local-subagent local-lint-diagnosis --file /tmp/diag.txt -- "explain and propose the smallest fix"
-run-local-subagent local-go-test-designer --file /tmp/fn.go -- "design focused table-driven tests"
-run-local-subagent local-crap-refactor --file /tmp/fn.go -- "suggest a bounded CRAP reduction"
-run-local-subagent local-patch-review -- "review the current unstaged patch"
-run-local-subagent local-project-scout -- "scout concurrency paths only"
+run-local-subagent <role> --file /tmp/fn.go -- "your question"
 ```
 
-If `run-local-subagent` is missing from `PATH`, skip local delegation and say
-so. Do not copy these scripts into the repository under review.
+Roles: `local-lint-diagnosis`, `local-go-test-designer`, `local-crap-refactor`,
+`local-patch-review`, `local-project-scout`. Rules:
 
-Rules:
+1. One isolated failure or function per call.
+2. Local subagents are read-only — apply accepted changes yourself.
+3. Rerun `scripts/check.sh` after every applied change.
+4. Skip delegation and say so if `run-local-subagent` is missing. Never copy
+   these scripts into the repository under review.
 
-1. Delegate only one isolated failure or function at a time (fix loops).
-2. Keep the primary IDE model unchanged; the bridge pins `ollama/go-check-it-local`.
-3. Apply accepted changes yourself (or with the primary agent). Local subagents
-   are read-only.
-4. Rerun `scripts/check.sh` after every applied change.
-
-### Optional swarm for independent project scouting
-
-When you need **3+ orthogonal** read-only looks (entry points, concurrency,
-permissions, tests/docs) and Ollama can run in parallel, use the opt-in
-orchestrator instead of serial scouts:
-
-```sh
-run-local-swarm --manifest /tmp/swarm-manifest.json --max-workers 2
-```
-
-Write a small JSON manifest of allowlisted roles (usually `local-project-scout`)
-with distinct prompts/shards. Default workers is 2 (hard max 4). Synthesize the
-JSON envelope yourself; never auto-apply swarm output. Skip swarm for a single
-cross-cutting bug, tiny repos, or when Ollama is already memory-bound (64K
-context × workers). Details and an example manifest:
-[OPENCODE.md](references/OPENCODE.md).
-
-If the bridge is unavailable, continue with the deterministic gates above and
-report that local delegation was skipped. Setup details are in
-[OPENCODE.md](references/OPENCODE.md).
+For the setup steps, the swarm variant (`run-local-swarm`, 3+ independent
+scouts), and the trust boundary: [OPENCODE.md](references/OPENCODE.md).
 
 ## Judgment
 
 - Keep fixes narrow and idiomatic.
+- Avoid over-fragmentation: extracting helper functions is fine, but don't
+  spin up a new package per helper — see [REFACTORING.md](references/REFACTORING.md).
 - Treat `goroutinelifetime` confidence as a review signal, not proof of a leak.
 - If a heuristic finding is incorrect for the code, explain why instead of
   suppressing it broadly.
