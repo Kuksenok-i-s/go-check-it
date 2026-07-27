@@ -87,7 +87,9 @@ Use `/tmp/go-check-it` instead of `go-check-it` when step 1 built the local bina
 
 Treat these outcomes as failures to fix:
 
-- exit `2`: at least one function has CRAP greater than `8.0`;
+- exit `2`: at least one function has CRAP greater than the threshold
+  (default `8.0`; override with `--threshold=N` if the repo's own docs say
+  to use a different value — don't invent one yourself);
 - exit `3`: one or more Go practice findings were reported;
 - exit `1`: usage, tooling, cancellation, or coverage infrastructure failed.
 

@@ -135,6 +135,42 @@ func TestParseArgs_MaxWorkersMissingValue(t *testing.T) {
 	}
 }
 
+func TestParseArgs_DefaultThresholdIsEight(t *testing.T) {
+	got, err := ParseArgs(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Threshold != DefaultThreshold {
+		t.Fatalf("expected default threshold %v, got %v", DefaultThreshold, got.Threshold)
+	}
+}
+
+func TestParseArgs_ThresholdExplicit(t *testing.T) {
+	got, err := ParseArgs([]string{"--threshold=15", "--explain"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Threshold != 15 {
+		t.Fatalf("expected threshold 15, got %v", got.Threshold)
+	}
+	if got.Mode != ModeAllSrc || !got.Explain {
+		t.Fatalf("unexpected args: %+v", got)
+	}
+}
+
+func TestParseArgs_InvalidThresholdErrors(t *testing.T) {
+	for _, args := range [][]string{
+		{"--threshold=0"},
+		{"--threshold=-1"},
+		{"--threshold=abc"},
+	} {
+		_, err := ParseArgs(args)
+		if err == nil {
+			t.Fatalf("expected error for %v", args)
+		}
+	}
+}
+
 func TestParseArgs_MaxWorkersInvalidValue(t *testing.T) {
 	for _, args := range [][]string{
 		{"--max-workers", "0"},

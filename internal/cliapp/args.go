@@ -10,16 +10,21 @@ import (
 // Flag names and format values, defined once and reused across parsing,
 // help text, and validation.
 const (
-	flagHelp           = "--help"
-	flagChanged        = "--changed"
-	flagExplain        = "--explain"
-	flagFailOnFindings = "--fail-on-findings"
-	flagMaxWorkers     = "--max-workers"
-	flagFormatPrefix   = "--format="
+	flagHelp            = "--help"
+	flagChanged         = "--changed"
+	flagExplain         = "--explain"
+	flagFailOnFindings  = "--fail-on-findings"
+	flagMaxWorkers      = "--max-workers"
+	flagFormatPrefix    = "--format="
+	flagThresholdPrefix = "--threshold="
 
 	formatText = "text"
 	formatJSON = "json"
 )
+
+// DefaultThreshold is the CRAP score above which a run fails when
+// --threshold is not given.
+const DefaultThreshold = 8.0
 
 // Mode selects which set of files go-check-it analyzes.
 type Mode int
@@ -50,6 +55,9 @@ type Arguments struct {
 	// MaxWorkers is the maximum number of modules analyzed concurrently.
 	// Defaults to half the number of logical CPUs (at least 1).
 	MaxWorkers int
+	// Threshold is the CRAP score above which the run fails. Defaults to
+	// DefaultThreshold.
+	Threshold float64
 }
 
 // ParseArgs parses raw CLI arguments into Arguments.
@@ -62,13 +70,13 @@ type Arguments struct {
 //   - otherwise, non-flag args become the explicit file list
 //
 // Additionally, "--explain", "--fail-on-findings", "--format=text|json",
-// and "--max-workers N" are recognized in any mode.
+// "--max-workers N", and "--threshold=N" are recognized in any mode.
 func ParseArgs(args []string) (Arguments, error) {
 	if containsFlag(args, flagHelp) {
-		return Arguments{Mode: ModeHelp, MaxWorkers: defaultMaxWorkers()}, nil
+		return Arguments{Mode: ModeHelp, MaxWorkers: defaultMaxWorkers(), Threshold: DefaultThreshold}, nil
 	}
 	if len(args) == 0 {
-		return Arguments{Mode: ModeAllSrc, Format: formatText, MaxWorkers: defaultMaxWorkers()}, nil
+		return Arguments{Mode: ModeAllSrc, Format: formatText, MaxWorkers: defaultMaxWorkers(), Threshold: DefaultThreshold}, nil
 	}
 	return parseArgsFlags(args)
 }
@@ -79,6 +87,10 @@ func parseArgsFlags(args []string) (Arguments, error) {
 		return Arguments{}, err
 	}
 	format, err := parseFormat(rest)
+	if err != nil {
+		return Arguments{}, err
+	}
+	threshold, err := parseThreshold(rest)
 	if err != nil {
 		return Arguments{}, err
 	}
@@ -94,6 +106,7 @@ func parseArgsFlags(args []string) (Arguments, error) {
 		FailOnFindings: containsFlag(rest, flagFailOnFindings),
 		Format:         format,
 		MaxWorkers:     maxWorkers,
+		Threshold:      threshold,
 	}, nil
 }
 
@@ -125,6 +138,9 @@ func hasUnknownFlag(args []string) bool {
 		if strings.HasPrefix(arg, flagFormatPrefix) {
 			continue
 		}
+		if strings.HasPrefix(arg, flagThresholdPrefix) {
+			continue
+		}
 		if !knownFlags[arg] {
 			return true
 		}
@@ -144,6 +160,24 @@ func parseFormat(args []string) (string, error) {
 		return "", fmt.Errorf("--format must be %q or %q, got %q", formatText, formatJSON, format)
 	}
 	return format, nil
+}
+
+// parseThreshold pulls --threshold=N out of args. When the flag is absent,
+// DefaultThreshold is used.
+func parseThreshold(args []string) (float64, error) {
+	threshold := DefaultThreshold
+	for _, arg := range args {
+		if !strings.HasPrefix(arg, flagThresholdPrefix) {
+			continue
+		}
+		raw := strings.TrimPrefix(arg, flagThresholdPrefix)
+		v, err := strconv.ParseFloat(raw, 64)
+		if err != nil || v <= 0 {
+			return 0, fmt.Errorf("--threshold requires a positive number, got %q", raw)
+		}
+		threshold = v
+	}
+	return threshold, nil
 }
 
 // extractMaxWorkers pulls --max-workers N out of args and returns the worker
@@ -210,5 +244,6 @@ Flags (combine with any mode above):
   --fail-on-findings         Exit non-zero if any practice finding is reported
   --format=text|json         Output format (default text)
   --max-workers N            Analyze up to N modules in parallel (default: half the CPUs)
+  --threshold=N              CRAP score above which the run fails (default 8.0)
 `
 }

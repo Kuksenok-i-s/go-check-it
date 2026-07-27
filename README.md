@@ -190,6 +190,7 @@ personal paths, verification, and official platform documentation.
                       the logical CPUs, at least 1). Caps at the number of
                       discovered modules. File discovery and practice checks
                       remain sequential.
+--threshold=N         CRAP score above which the run fails (default 8.0)
 ```
 
 Examples:
@@ -203,6 +204,7 @@ Examples:
 ./go-check-it internal/server internal/store
 ./go-check-it --explain internal/server
 ./go-check-it --format=json --fail-on-findings
+./go-check-it --threshold=15
 ```
 
 ## Exit codes
@@ -210,7 +212,7 @@ Examples:
 * `0` success, threshold respected (or nothing to analyze)
 * `1` invalid CLI usage, an infra-level failure (e.g. `go` not found), or the
   run was interrupted (e.g. Ctrl-C) while generating coverage
-* `2` CRAP threshold exceeded (`> 8.0`)
+* `2` CRAP threshold exceeded (`> 8.0` by default; override with `--threshold=N`)
 * `3` `--fail-on-findings` was set and at least one practice finding was
   reported
 

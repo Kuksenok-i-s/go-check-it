@@ -120,6 +120,9 @@ func TestExecute_HelpPrintsUsageAndExitsZero(t *testing.T) {
 	if !strings.Contains(stdout.String(), "--max-workers") {
 		t.Fatalf("expected --max-workers in usage, got %q", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "--threshold") {
+		t.Fatalf("expected --threshold in usage, got %q", stdout.String())
+	}
 }
 
 func TestExecute_UsageErrorExitsOne(t *testing.T) {
@@ -212,6 +215,54 @@ func Risky(a, b, c int) int {
 	}
 	if !strings.Contains(stderr.String(), "CRAP threshold exceeded") {
 		t.Fatalf("expected threshold message, got %q", stderr.String())
+	}
+}
+
+func TestExecute_CustomThresholdRaisesBar(t *testing.T) {
+	root := t.TempDir()
+	writeGoFile(t, filepath.Join(root, "go.mod"), "module m\n")
+	writeGoFile(t, filepath.Join(root, "risky.go"), `package m
+
+func Risky(a, b, c int) int {
+	if a > 0 && b > 0 {
+		if c > 0 {
+			return a + b + c
+		}
+		return a
+	}
+	for i := 0; i < a; i++ {
+		b += i
+	}
+	switch {
+	case b > 10:
+		return b
+	case b < 0:
+		return -b
+	default:
+		return 0
+	}
+}
+`)
+
+	profile := filepath.Join(root, "cover.out")
+	writeGoFile(t, profile, "mode: set\nm/risky.go:4.30,18.2 8 0\n")
+
+	gen := &fakeCoverage{profilePath: profile}
+	app, stdout, _ := newTestApp(t, root, gen)
+	code := app.Execute(context.Background(), []string{"--threshold=100"})
+	if code != ExitOK {
+		t.Fatalf("expected exit 0 with raised threshold, got %d (stdout: %s)", code, stdout.String())
+	}
+}
+
+func TestExecute_InvalidThresholdExitsOne(t *testing.T) {
+	app, _, stderr := newTestApp(t, t.TempDir(), &fakeCoverage{})
+	code := app.Execute(context.Background(), []string{"--threshold=abc"})
+	if code != ExitUsageError {
+		t.Fatalf("expected exit 1, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "--threshold") {
+		t.Fatalf("expected threshold error message, got %q", stderr.String())
 	}
 }
 

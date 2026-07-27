@@ -22,9 +22,6 @@ import (
 	"go-check-it/internal/sourcefind"
 )
 
-// Threshold is the CRAP score above which the run is considered a failure.
-const Threshold = 8.0
-
 // Exit codes, mirroring crap4java's Main/CliApplication, plus
 // ExitFindingsFailed for the opt-in --fail-on-findings flag.
 const (
@@ -117,8 +114,8 @@ func (a *App) collectResults(ctx context.Context, files []string, maxWorkers int
 }
 
 func (a *App) exitAfterReport(max float64, findings []practices.Finding, parsed Arguments) int {
-	if max > Threshold {
-		fmt.Fprintf(a.Stderr, "CRAP threshold exceeded: %.1f > %.1f\n", max, Threshold)
+	if max > parsed.Threshold {
+		fmt.Fprintf(a.Stderr, "CRAP threshold exceeded: %.1f > %.1f\n", max, parsed.Threshold)
 		return ExitThresholdExceeded
 	}
 	if parsed.FailOnFindings && len(findings) > 0 {
