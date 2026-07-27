@@ -79,11 +79,12 @@ func literalArg(call *ast.CallExpr) (string, *ast.BasicLit, bool) {
 }
 
 func styleIssue(msg string) string {
-	first := []rune(msg)[0]
+	runes := []rune(msg)
+	first := runes[0]
 	if unicode.IsUpper(first) && !isAllCapsWord(msg) {
 		return "should not be capitalized"
 	}
-	last := []rune(msg)[len(msg)-1]
+	last := runes[len(runes)-1]
 	if last == '.' || last == '!' {
 		return "should not end with punctuation"
 	}
