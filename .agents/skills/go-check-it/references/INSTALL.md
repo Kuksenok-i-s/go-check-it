@@ -75,29 +75,38 @@ Pass `--force` to replace only that installed `go-check-it` directory:
 sh scripts/install-agent-skill.sh cursor --force
 ```
 
-## Local Ollama / OpenCode (all IDEs)
+## Local Ollama / OpenCode / small-model pipeline (all IDEs)
 
-Local-model help for small diagnostics is shared across Cursor, VS Code,
-Claude Code, Codex, and OpenCode through OpenCode + Ollama. Primary IDE models
-stay unchanged.
+Focused model help is shared across Cursor, VS Code, Claude Code, Codex, and
+OpenCode through OpenCode bridges. Primary IDE models stay unchanged for final
+review and edits.
 
 Install the bridge on `PATH` once, then use it from any project:
 
 ```sh
 sh scripts/install-path.sh
 setup-opencode
+
+# Preferred: compact report + tiered small-model pipeline
+export GO_CHECK_IT_SMALL_MODEL=provider/model   # e.g. anthropic/claude-haiku-4-5
+go-check-it --format=agent-json --top=6 --fail-on-findings > /tmp/agent.json || true
+run-go-check-it-agents --agent-json /tmp/agent.json --max-workers 2
+
+# Fallback: local Ollama leaf
 run-local-subagent local-lint-diagnosis -- "diagnose the first failing check"
-# optional parallel scouts for independent project aspects:
+# optional parallel local scouts:
 # run-local-swarm --manifest /tmp/swarm-manifest.json --max-workers 2
 ```
 
-`install-path.sh` places `run-local-subagent`, `run-local-swarm`, and
-`setup-opencode` in `~/.local/bin`, copies the `local-*` agents into
+`install-path.sh` places `run-local-subagent`, `run-local-swarm`,
+`run-small-subagent`, `run-go-check-it-agents`, and `setup-opencode` in
+`~/.local/bin`, copies `local-*` and `small-*` agents into
 `~/.config/opencode/agents/`, and merges `ollama/go-check-it-local` into the
 user OpenCode config.
 
-See [OPENCODE.md](OPENCODE.md) for model selection, the 64K alias, roles,
-optional swarm, and trust boundaries.
+See [OPENCODE.md](OPENCODE.md) for automatic model recommendation (with
+confirmation), the 64K alias, roles, evidence packets, optional swarm, and
+trust boundaries.
 
 ## Official references
 

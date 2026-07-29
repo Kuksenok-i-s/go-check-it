@@ -70,3 +70,82 @@ func MaxCrap(metrics []analyzer.FunctionMetrics) float64 {
 	}
 	return max
 }
+
+// CountAboveThreshold returns how many metrics have a numeric CRAP score
+// strictly greater than threshold.
+func CountAboveThreshold(metrics []analyzer.FunctionMetrics, threshold float64) int {
+	n := 0
+	for _, m := range metrics {
+		if m.CrapScore != nil && *m.CrapScore > threshold {
+			n++
+		}
+	}
+	return n
+}
+
+// MaxCrapFunction returns the metrics row with the highest numeric CRAP
+// score, or nil when no numeric scores exist. Ties keep the first occurrence
+// (metrics are expected to be sorted CRAP-descending).
+func MaxCrapFunction(metrics []analyzer.FunctionMetrics) *analyzer.FunctionMetrics {
+	var best *analyzer.FunctionMetrics
+	max := 0.0
+	for i := range metrics {
+		m := &metrics[i]
+		if m.CrapScore == nil {
+			continue
+		}
+		if best == nil || *m.CrapScore > max {
+			best = m
+			max = *m.CrapScore
+		}
+	}
+	return best
+}
+
+// TopN returns up to n metrics with non-nil CRAP scores, preserving input
+// order. Metrics are expected to already be sorted CRAP-descending. When n
+// is less than 1, an empty slice is returned.
+func TopN(metrics []analyzer.FunctionMetrics, n int) []analyzer.FunctionMetrics {
+	if n < 1 {
+		return nil
+	}
+	out := make([]analyzer.FunctionMetrics, 0, n)
+	for _, m := range metrics {
+		if m.CrapScore == nil {
+			continue
+		}
+		out = append(out, m)
+		if len(out) >= n {
+			break
+		}
+	}
+	return out
+}
+
+// Hotspots returns the union of metrics above threshold and the global top-N
+// by CRAP, deduplicated by file:line:name and preserving CRAP-descending
+// order. Nil CRAP scores are excluded.
+func Hotspots(metrics []analyzer.FunctionMetrics, threshold float64, topN int) []analyzer.FunctionMetrics {
+	seen := make(map[string]bool)
+	out := make([]analyzer.FunctionMetrics, 0)
+	add := func(m analyzer.FunctionMetrics) {
+		if m.CrapScore == nil {
+			return
+		}
+		key := fmt.Sprintf("%s:%d:%s", m.File, m.Line, m.FunctionName)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, m)
+	}
+	for _, m := range metrics {
+		if m.CrapScore != nil && *m.CrapScore > threshold {
+			add(m)
+		}
+	}
+	for _, m := range TopN(metrics, topN) {
+		add(m)
+	}
+	return out
+}

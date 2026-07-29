@@ -15,11 +15,16 @@ const (
 	flagExplain         = "--explain"
 	flagFailOnFindings  = "--fail-on-findings"
 	flagMaxWorkers      = "--max-workers"
+	flagTopPrefix       = "--top="
 	flagFormatPrefix    = "--format="
 	flagThresholdPrefix = "--threshold="
 
-	formatText = "text"
-	formatJSON = "json"
+	formatText      = "text"
+	formatJSON      = "json"
+	formatAgentJSON = "agent-json"
+
+	// DefaultTopN is the default hotspot limit for --format=agent-json.
+	DefaultTopN = 6
 )
 
 // DefaultThreshold is the CRAP score above which a run fails when
@@ -50,7 +55,7 @@ type Arguments struct {
 	Explain bool
 	// FailOnFindings makes any practice finding return a non-zero exit code.
 	FailOnFindings bool
-	// Format is "text" (default) or "json".
+	// Format is "text" (default), "json", or "agent-json".
 	Format string
 	// MaxWorkers is the maximum number of modules analyzed concurrently.
 	// Defaults to half the number of logical CPUs (at least 1).
@@ -58,6 +63,9 @@ type Arguments struct {
 	// Threshold is the CRAP score above which the run fails. Defaults to
 	// DefaultThreshold.
 	Threshold float64
+	// TopN limits CRAP hotspots in --format=agent-json. Defaults to
+	// DefaultTopN. Ignored for text/json formats.
+	TopN int
 }
 
 // ParseArgs parses raw CLI arguments into Arguments.
@@ -73,10 +81,21 @@ type Arguments struct {
 // "--max-workers N", and "--threshold=N" are recognized in any mode.
 func ParseArgs(args []string) (Arguments, error) {
 	if containsFlag(args, flagHelp) {
-		return Arguments{Mode: ModeHelp, MaxWorkers: defaultMaxWorkers(), Threshold: DefaultThreshold}, nil
+		return Arguments{
+			Mode:       ModeHelp,
+			MaxWorkers: defaultMaxWorkers(),
+			Threshold:  DefaultThreshold,
+			TopN:       DefaultTopN,
+		}, nil
 	}
 	if len(args) == 0 {
-		return Arguments{Mode: ModeAllSrc, Format: formatText, MaxWorkers: defaultMaxWorkers(), Threshold: DefaultThreshold}, nil
+		return Arguments{
+			Mode:       ModeAllSrc,
+			Format:     formatText,
+			MaxWorkers: defaultMaxWorkers(),
+			Threshold:  DefaultThreshold,
+			TopN:       DefaultTopN,
+		}, nil
 	}
 	return parseArgsFlags(args)
 }
@@ -94,6 +113,10 @@ func parseArgsFlags(args []string) (Arguments, error) {
 	if err != nil {
 		return Arguments{}, err
 	}
+	topN, err := parseTopN(rest)
+	if err != nil {
+		return Arguments{}, err
+	}
 	changed := containsFlag(rest, flagChanged)
 	values := nonFlagArgs(rest)
 	if changed && len(values) > 0 {
@@ -107,6 +130,7 @@ func parseArgsFlags(args []string) (Arguments, error) {
 		Format:         format,
 		MaxWorkers:     maxWorkers,
 		Threshold:      threshold,
+		TopN:           topN,
 	}, nil
 }
 
@@ -141,6 +165,9 @@ func hasUnknownFlag(args []string) bool {
 		if strings.HasPrefix(arg, flagThresholdPrefix) {
 			continue
 		}
+		if strings.HasPrefix(arg, flagTopPrefix) {
+			continue
+		}
 		if !knownFlags[arg] {
 			return true
 		}
@@ -156,10 +183,29 @@ func parseFormat(args []string) (string, error) {
 		}
 		format = strings.TrimPrefix(arg, flagFormatPrefix)
 	}
-	if format != formatText && format != formatJSON {
-		return "", fmt.Errorf("--format must be %q or %q, got %q", formatText, formatJSON, format)
+	switch format {
+	case formatText, formatJSON, formatAgentJSON:
+		return format, nil
+	default:
+		return "", fmt.Errorf("--format must be %q, %q, or %q, got %q", formatText, formatJSON, formatAgentJSON, format)
 	}
-	return format, nil
+}
+
+// parseTopN pulls --top=N out of args. When absent, DefaultTopN is used.
+func parseTopN(args []string) (int, error) {
+	topN := DefaultTopN
+	for _, arg := range args {
+		if !strings.HasPrefix(arg, flagTopPrefix) {
+			continue
+		}
+		raw := strings.TrimPrefix(arg, flagTopPrefix)
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			return 0, fmt.Errorf("--top requires a positive integer, got %q", raw)
+		}
+		topN = n
+	}
+	return topN, nil
 }
 
 // parseThreshold pulls --threshold=N out of args. When the flag is absent,
@@ -242,7 +288,8 @@ func Usage() string {
 Flags (combine with any mode above):
   --explain                  Print each practice finding's rationale, fix, and doc link
   --fail-on-findings         Exit non-zero if any practice finding is reported
-  --format=text|json         Output format (default text)
+  --format=text|json|agent-json  Output format (default text)
+  --top=N                    Hotspot limit for agent-json (default 6)
   --max-workers N            Analyze up to N modules in parallel (default: half the CPUs)
   --threshold=N              CRAP score above which the run fails (default 8.0)
 `

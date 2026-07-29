@@ -16,7 +16,7 @@ cat >"$fake_bin/curl" <<'EOF'
 #!/usr/bin/env bash
 # Only the tags probe is required by these scripts.
 if [[ "$*" == *"/api/tags"* ]]; then
-	printf '%s\n' '{"models":[{"name":"demo-model:latest"},{"name":"go-check-it-local:latest"}]}'
+	printf '%s\n' '{"models":[{"name":"demo-model:latest"},{"name":"other-chat:7b"},{"name":"nomic-embed-text:latest"},{"name":"go-check-it-local:latest"}]}'
 	exit 0
 fi
 echo "unexpected curl invocation: $*" >&2
@@ -85,6 +85,29 @@ GO_CHECK_IT_LOCAL_MODEL=demo-model:latest bash "$repo_root/scripts/setup-opencod
 grep -q 'FROM demo-model:latest' "$FAKE_STATE/Modelfile"
 grep -q 'num_ctx 65536' "$FAKE_STATE/Modelfile"
 grep -q 'create go-check-it-local' "$FAKE_STATE/ollama-create.args"
+
+# --- auto-recommend + confirm accepts without TTY ---
+rm -f "$FAKE_STATE"/*
+unset GO_CHECK_IT_LOCAL_MODEL
+GO_CHECK_IT_CONFIRM=1 bash "$repo_root/scripts/setup-opencode.sh" >"$FAKE_STATE/setup.out" 2>"$FAKE_STATE/setup.err"
+grep -q 'FROM other-chat:7b' "$FAKE_STATE/Modelfile"
+grep -q 'Recommended local model: other-chat:7b' "$FAKE_STATE/setup.err"
+grep -q 'GO_CHECK_IT_CONFIRM set; accepting recommendation.' "$FAKE_STATE/setup.err"
+# Embedding models and the alias itself must not be recommended.
+grep -qv 'nomic-embed-text' "$FAKE_STATE/Modelfile"
+grep -qv 'go-check-it-local' "$FAKE_STATE/Modelfile" || true
+# FROM line should not be the alias
+grep -q 'FROM other-chat:7b' "$FAKE_STATE/Modelfile"
+
+# --- without confirm or pin, non-TTY setup refuses to mutate ---
+rm -f "$FAKE_STATE/ollama-create.args" "$FAKE_STATE/Modelfile"
+unset GO_CHECK_IT_LOCAL_MODEL GO_CHECK_IT_CONFIRM
+if bash "$repo_root/scripts/setup-opencode.sh" >/dev/null 2>"$FAKE_STATE/noconfirm.err"; then
+	echo "expected non-TTY setup without confirm to fail" >&2
+	exit 1
+fi
+grep -q 'GO_CHECK_IT_CONFIRM=1' "$FAKE_STATE/noconfirm.err"
+[[ ! -f "$FAKE_STATE/ollama-create.args" ]]
 
 # --- check mode is non-mutating for create ---
 rm -f "$FAKE_STATE/ollama-create.args" "$FAKE_STATE/Modelfile"

@@ -126,8 +126,16 @@ func (a *App) exitAfterReport(max float64, findings []practices.Finding, parsed 
 }
 
 func (a *App) writeReport(metrics []analyzer.FunctionMetrics, findings []practices.Finding, parsed Arguments) error {
-	if parsed.Format == formatJSON {
+	switch parsed.Format {
+	case formatJSON:
 		out, err := report.FormatJSON(metrics, findings, a.ProjectRoot)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(a.Stdout, out)
+		return nil
+	case formatAgentJSON:
+		out, err := report.FormatAgentJSON(metrics, findings, a.ProjectRoot, parsed.Threshold, parsed.TopN)
 		if err != nil {
 			return err
 		}

@@ -1,22 +1,40 @@
-# OpenCode + Ollama local subagents
+# OpenCode + Ollama / small-model subagents
 
-This repository uses a shared OpenCode/Ollama bridge so Cursor, VS Code,
-Claude Code, Codex, and OpenCode can all request focused local-model help
-without changing each IDE's primary model.
+This repository uses a shared OpenCode bridge so Cursor, VS Code, Claude Code,
+Codex, and OpenCode can all request focused model help without changing each
+IDE's primary model.
+
+There are two tiers:
+
+1. **Small non-local models** (`run-small-subagent` / `run-go-check-it-agents`)
+   for dirty analysis and orchestration. Configure with
+   `GO_CHECK_IT_SMALL_MODEL=provider/model`. Credentials stay in the caller's
+   OpenCode config; go-check-it never writes secrets.
+2. **Local Ollama models** (`run-local-subagent` / `run-local-swarm`) pinned to
+   `ollama/go-check-it-local` for offline specialists.
 
 ## Setup
 
-1. Install and start [Ollama](https://docs.ollama.com/linux).
+1. Install and start [Ollama](https://docs.ollama.com/linux) if you want local
+   specialists.
 2. Pull any local model you already trust (this project never auto-pulls).
-3. From a go-check-it checkout, install host tools on `PATH` and OpenCode agents:
+3. Configure an OpenCode cloud/provider model for small non-local work and set:
+
+```sh
+export GO_CHECK_IT_SMALL_MODEL=provider/model   # e.g. anthropic/claude-haiku-4-5
+```
+
+4. From a go-check-it checkout, install host tools on `PATH` and OpenCode agents:
 
 ```sh
 sh scripts/install-path.sh
 setup-opencode
 ```
 
-`setup-opencode` lists installed models (or uses `GO_CHECK_IT_LOCAL_MODEL`), then
-creates/updates the stable alias `go-check-it-local` with `num_ctx 65536`.
+`setup-opencode` auto-recommends an installed model (preferring coder-oriented
+names and ≥64K context), asks for confirmation, then creates/updates the stable
+alias `go-check-it-local` with `num_ctx 65536`. Set `GO_CHECK_IT_LOCAL_MODEL` to
+pin a model, or `GO_CHECK_IT_CONFIRM=1` to accept the recommendation non-interactively.
 OpenCode documents a 64K minimum context for repository work.
 
 Optional:
@@ -29,25 +47,51 @@ setup-opencode --install   # ollama launch opencode
 `--install` may offer to install OpenCode through Ollama. It never installs
 Cursor.
 
-Verify the alias and runtime allocation:
+Verify:
 
 ```sh
 ollama list
 ollama ps
+command -v run-go-check-it-agents
+command -v run-small-subagent
+command -v run-local-subagent
 ```
 
 `opencode.json` registers `limit.context` for token accounting only. The real
-context window comes from the Ollama alias parameter.
+local context window comes from the Ollama alias parameter.
 
-## Cross-IDE bridge
+## Tiered pipeline (preferred)
 
-Every IDE should call (from any project directory):
+Every IDE should call:
+
+```sh
+go-check-it --format=agent-json --top=6 --fail-on-findings > /tmp/agent.json || true
+run-go-check-it-agents --agent-json /tmp/agent.json --max-workers 2
+```
+
+This:
+
+- clusters CRAP hotspots into at most 6 `small-quality-worker` tasks;
+- runs them via OpenCode with `GO_CHECK_IT_SMALL_MODEL`;
+- asks `small-go-check-it-orchestrator` to emit a validated evidence packet;
+- may let the orchestrator call allowlisted `local-*` specialists;
+- writes raw OpenCode event logs under `raw_logs_dir` (opt-in debug only);
+- never applies edits.
+
+Single small-agent leaf:
+
+```sh
+run-small-subagent small-quality-worker --file /tmp/context.json -- "diagnose one hotspot"
+run-small-subagent small-go-check-it-orchestrator --file /tmp/workers.json -- "synthesize packet"
+```
+
+## Local Ollama bridge
 
 ```sh
 run-local-subagent <role> --file /tmp/context.txt -- "your question"
 ```
 
-Allowlisted roles:
+Allowlisted local roles:
 
 | Role | Purpose |
 |---|---|
@@ -73,9 +117,11 @@ Inside OpenCode you can also invoke them manually:
 @local-crap-refactor analyze the highest-CRAP function
 @local-patch-review review the current unstaged patch
 @local-project-scout scout concurrency and cancellation paths
+@small-quality-worker analyze one hotspot cluster
+@small-go-check-it-orchestrator synthesize worker results
 ```
 
-## Optional swarm (bounded parallel scouts)
+## Optional local swarm (bounded parallel scouts)
 
 When **three or more independent** analysis areas exist (for example entry
 points, concurrency, security/permissions, tests/docs), you may fan out with
@@ -115,8 +161,8 @@ Flags:
 
 The swarm prints one JSON envelope with results in manifest order. Exit `0`
 only when every task succeeds; `1` means partial failure/timeout; `2` means
-invalid input. The primary IDE agent synthesizes the envelope and owns all
-edits. There is no automatic semantic merge and no invented token budget.
+invalid input. Prefer `run-go-check-it-agents` for CRAP hotspot fan-out; use
+`run-local-swarm` for orthogonal local scouts.
 
 ### When swarm is worth it
 
@@ -137,31 +183,32 @@ Skip it when:
 ## Delegation loop
 
 1. Run the deterministic gate: `bash <skill-dir>/scripts/check.sh`.
-2. On the first failure, extract only that diagnostic and nearby code.
-3. Call `run-local-subagent` with one role and that bounded context
-   (or `run-local-swarm` for independent scouts).
-4. Apply any accepted change in the primary IDE agent.
-5. Rerun the full gate before declaring success.
+2. On failure, prefer `run-go-check-it-agents` with `agent-json` when the small
+   model is configured; otherwise extract one diagnostic and call
+   `run-local-subagent`.
+3. Primary IDE agent reviews the evidence packet / proposed diffs.
+4. Apply accepted changes; run focused package/tool checks.
+5. Run full `scripts/check.sh` once when candidate-clean.
 
-Delegate one isolated failure or function at a time for fix loops. For
-project scouting, keep each swarm task to a named shard — do not send the
-whole repository to every worker.
+Do not paste raw worker transcripts or full race stacks into the primary chat.
+Use `raw_logs_dir` and race summaries instead.
 
 ## Trust boundary
 
-Local subagents may read code and run narrowly allowlisted diagnostic
-commands. Agent files use `mode: all` so they can be invoked both through
-`run-local-subagent` / `opencode run --agent` and via `@name`
-inside OpenCode. They must not:
+Local and small subagents may read code and run narrowly allowlisted diagnostic
+commands. Agent files use `mode: all` so they can be invoked both through the
+bridges / `opencode run --agent` and via `@name` inside OpenCode. They must not:
 
 - edit files;
 - install packages;
-- open network endpoints;
-- recursively spawn other agents;
+- open network endpoints (except the model provider already configured in OpenCode);
+- recursively spawn unlimited agents (`small-quality-worker` cannot task at all;
+  the orchestrator may only call allowlisted `local-*` leaves);
 - decide the project is clean without a fresh gate run.
 
-The primary IDE agent owns all edits and final verification. `run-local-swarm`
-only orchestrates allowlisted leaf calls; it never widens permissions.
+The primary IDE agent owns all edits and final verification.
+`run-go-check-it-agents` / `run-local-swarm` only orchestrate allowlisted leaf
+calls; they never widen permissions.
 
 ## Official references
 

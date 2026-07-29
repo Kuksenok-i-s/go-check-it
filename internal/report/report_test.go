@@ -90,6 +90,103 @@ func TestFormatFindings_EmptyAndExplained(t *testing.T) {
 	}
 }
 
+func TestCountAboveThresholdAndTopN(t *testing.T) {
+	metrics := []analyzer.FunctionMetrics{
+		{FunctionName: "A", File: "a.go", Line: 1, CrapScore: f64(30)},
+		{FunctionName: "B", File: "b.go", Line: 2, CrapScore: f64(10)},
+		{FunctionName: "C", File: "c.go", Line: 3, CrapScore: f64(5)},
+		{FunctionName: "D", File: "d.go", Line: 4, CrapScore: nil},
+	}
+	if got := CountAboveThreshold(metrics, 8); got != 2 {
+		t.Fatalf("CountAboveThreshold: got %d, want 2", got)
+	}
+	top := TopN(metrics, 2)
+	if len(top) != 2 || top[0].FunctionName != "A" || top[1].FunctionName != "B" {
+		t.Fatalf("TopN unexpected: %#v", top)
+	}
+	if TopN(metrics, 0) != nil {
+		t.Fatal("TopN(0) should be empty")
+	}
+	best := MaxCrapFunction(metrics)
+	if best == nil || best.FunctionName != "A" {
+		t.Fatalf("MaxCrapFunction: %#v", best)
+	}
+	hot := Hotspots(metrics, 8, 1)
+	// Above threshold: A,B; top-1: A; union still A,B in order.
+	if len(hot) != 2 || hot[0].FunctionName != "A" || hot[1].FunctionName != "B" {
+		t.Fatalf("Hotspots unexpected: %#v", hot)
+	}
+}
+
+func TestFormatAgentJSON_BoundedHotspotsAndOmitted(t *testing.T) {
+	root := "/proj"
+	metrics := []analyzer.FunctionMetrics{
+		{FunctionName: "Risky", Package: "pkg", File: filepath.Join(root, "pkg/risky.go"), Line: 10, Complexity: 5, CoveragePercent: f64(20), CrapScore: f64(30.5)},
+		{FunctionName: "Mild", Package: "pkg", File: filepath.Join(root, "pkg/mild.go"), Line: 4, Complexity: 3, CoveragePercent: f64(50), CrapScore: f64(9)},
+		{FunctionName: "Safe", Package: "pkg", File: filepath.Join(root, "pkg/safe.go"), Line: 2, Complexity: 1, CoveragePercent: f64(100), CrapScore: f64(1)},
+	}
+	findings := []practices.Finding{{
+		Rule:    "doccomment",
+		Message: "exported func missing doc",
+		Position: token.Position{
+			Filename: filepath.Join(root, "pkg/risky.go"),
+			Line:     10,
+			Column:   1,
+		},
+		Description: practices.Description{
+			Summary: "Document exports",
+			Why:     "godoc",
+			Fix:     "add a comment",
+			DocURL:  "https://go.dev/doc/comment",
+		},
+		Confidence: 10,
+	}}
+
+	out, err := FormatAgentJSON(metrics, findings, root, 8.0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		Summary struct {
+			Threshold           float64 `json:"threshold"`
+			MaxCrap             float64 `json:"maxCrap"`
+			MaxCrapFunction     string  `json:"maxCrapFunction"`
+			FunctionCount       int     `json:"functionCount"`
+			AboveThresholdCount int     `json:"aboveThresholdCount"`
+			FindingCount        int     `json:"findingCount"`
+			HotspotLimit        int     `json:"hotspotLimit"`
+		} `json:"summary"`
+		Hotspots []map[string]any `json:"hotspots"`
+		Findings []map[string]any `json:"findings"`
+		Omitted  struct {
+			FunctionsAboveHotspots int `json:"functionsAboveHotspots"`
+			FunctionsTotalOmitted  int `json:"functionsTotalOmitted"`
+		} `json:"omitted"`
+	}
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, out)
+	}
+	if parsed.Summary.Threshold != 8 || parsed.Summary.MaxCrap != 30.5 || parsed.Summary.MaxCrapFunction != "Risky" {
+		t.Fatalf("unexpected summary: %#v", parsed.Summary)
+	}
+	if parsed.Summary.FunctionCount != 3 || parsed.Summary.AboveThresholdCount != 2 || parsed.Summary.FindingCount != 1 {
+		t.Fatalf("unexpected counts: %#v", parsed.Summary)
+	}
+	// Union of above-threshold (Risky, Mild) and top-1 (Risky) → both above-threshold rows.
+	if len(parsed.Hotspots) != 2 {
+		t.Fatalf("expected 2 hotspots, got %#v", parsed.Hotspots)
+	}
+	if parsed.Hotspots[0]["functionName"] != "Risky" {
+		t.Fatalf("expected Risky first: %#v", parsed.Hotspots)
+	}
+	if parsed.Findings[0]["why"] != "godoc" {
+		t.Fatalf("missing finding why: %#v", parsed.Findings[0])
+	}
+	if parsed.Omitted.FunctionsTotalOmitted != 1 {
+		t.Fatalf("expected 1 omitted function, got %#v", parsed.Omitted)
+	}
+}
+
 func TestFormatJSON_IncludesMetricsAndFindings(t *testing.T) {
 	root := "/proj"
 	metrics := []analyzer.FunctionMetrics{

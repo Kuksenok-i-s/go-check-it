@@ -10,15 +10,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import signal
-import subprocess
 import sys
-import threading
-import time
-from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
+
+from lib.swarm_runtime import SwarmTask, run_swarm  # noqa: E402
 
 ALLOWED_ROLES = frozenset(
     {
@@ -42,20 +41,23 @@ EXIT_PARTIAL = 1
 EXIT_USAGE = 2
 
 
-@dataclass
-class Task:
-    id: str
-    role: str
-    prompt: str
-    files: list[str]
-
-
 class SwarmError(Exception):
     """Invalid input or configuration."""
 
 
 def script_dir() -> Path:
-    return Path(__file__).resolve().parent
+    return SCRIPT_DIR
+
+
+def shutil_which(name: str) -> str | None:
+    path = os.environ.get("PATH", "")
+    for directory in path.split(os.pathsep):
+        if not directory:
+            continue
+        candidate = Path(directory) / name
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
 
 
 def resolve_bridge() -> Path:
@@ -79,18 +81,7 @@ def resolve_bridge() -> Path:
     )
 
 
-def shutil_which(name: str) -> str | None:
-    path = os.environ.get("PATH", "")
-    for directory in path.split(os.pathsep):
-        if not directory:
-            continue
-        candidate = Path(directory) / name
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return str(candidate)
-    return None
-
-
-def load_manifest(path: Path) -> list[Task]:
+def load_manifest(path: Path) -> list[SwarmTask]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except OSError as exc:
@@ -111,7 +102,7 @@ def load_manifest(path: Path) -> list[Task]:
         raise SwarmError(f"manifest has {len(items)} tasks; maximum is {MAX_TASKS}")
 
     seen: set[str] = set()
-    tasks: list[Task] = []
+    tasks: list[SwarmTask] = []
     for index, item in enumerate(items):
         if not isinstance(item, dict):
             raise SwarmError(f"task[{index}] must be an object")
@@ -151,7 +142,7 @@ def load_manifest(path: Path) -> list[Task]:
             resolved_files.append(str(p.resolve()))
 
         tasks.append(
-            Task(
+            SwarmTask(
                 id=task_id.strip(),
                 role=role,
                 prompt=prompt.strip(),
@@ -161,251 +152,13 @@ def load_manifest(path: Path) -> list[Task]:
     return tasks
 
 
-def build_command(bridge: Path, task: Task) -> list[str]:
+def build_command(bridge: Path, task: SwarmTask) -> list[str]:
     cmd = [str(bridge), task.role]
     for file_path in task.files:
         cmd.extend(["--file", file_path])
     if task.prompt:
         cmd.extend(["--", task.prompt])
     return cmd
-
-
-def terminate_process(proc: subprocess.Popen[Any]) -> None:
-    if proc.poll() is not None:
-        return
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    try:
-        proc.wait(timeout=3)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        try:
-            proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            pass
-
-
-def run_task(
-    bridge: Path,
-    task: Task,
-    task_timeout: float,
-    cancel_event: threading.Event,
-) -> dict[str, Any]:
-    started = time.monotonic()
-    cmd = build_command(bridge, task)
-    result: dict[str, Any] = {
-        "id": task.id,
-        "role": task.role,
-        "status": "error",
-        "exit_code": None,
-        "timed_out": False,
-        "duration_sec": 0.0,
-        "stdout": "",
-        "stderr": "",
-        "error": None,
-    }
-
-    if cancel_event.is_set():
-        result["status"] = "cancelled"
-        result["error"] = "cancelled before start"
-        result["duration_sec"] = round(time.monotonic() - started, 3)
-        return result
-
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=True,
-        )
-    except OSError as exc:
-        result["error"] = str(exc)
-        result["duration_sec"] = round(time.monotonic() - started, 3)
-        return result
-
-    deadline = started + task_timeout
-    stdout_data = ""
-    stderr_data = ""
-    timed_out = False
-    cancelled = False
-
-    try:
-        while True:
-            if cancel_event.is_set():
-                cancelled = True
-                terminate_process(proc)
-                break
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                timed_out = True
-                terminate_process(proc)
-                break
-            try:
-                stdout_data, stderr_data = proc.communicate(timeout=min(0.2, remaining))
-                break
-            except subprocess.TimeoutExpired:
-                continue
-    finally:
-        if proc.poll() is None:
-            terminate_process(proc)
-            if not stdout_data and not stderr_data:
-                try:
-                    out, err = proc.communicate(timeout=1)
-                    stdout_data = out or ""
-                    stderr_data = err or ""
-                except subprocess.TimeoutExpired:
-                    pass
-
-    duration = round(time.monotonic() - started, 3)
-    result["duration_sec"] = duration
-    result["stdout"] = stdout_data
-    result["stderr"] = stderr_data
-    result["exit_code"] = proc.returncode
-    result["timed_out"] = timed_out
-
-    if cancelled:
-        result["status"] = "cancelled"
-        result["error"] = "cancelled"
-    elif timed_out:
-        result["status"] = "timeout"
-        result["error"] = f"task exceeded {task_timeout}s"
-    elif proc.returncode == 0:
-        result["status"] = "ok"
-    else:
-        result["status"] = "error"
-        result["error"] = f"exit code {proc.returncode}"
-
-    return result
-
-
-def run_swarm(
-    tasks: list[Task],
-    bridge: Path,
-    max_workers: int,
-    task_timeout: float,
-    total_timeout: float,
-) -> tuple[list[dict[str, Any]], str]:
-    cancel_event = threading.Event()
-    results: dict[str, dict[str, Any]] = {}
-    lock = threading.Lock()
-
-    overall_status = "ok"
-    started = time.monotonic()
-
-    def _handle_signal(signum: int, _frame: Any) -> None:
-        cancel_event.set()
-        nonlocal overall_status
-        overall_status = "cancelled"
-
-    previous_int = signal.signal(signal.SIGINT, _handle_signal)
-    previous_term = signal.signal(signal.SIGTERM, _handle_signal)
-
-    try:
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(run_task, bridge, task, task_timeout, cancel_event): task
-                for task in tasks
-            }
-            pending = set(futures.keys())
-            while pending:
-                remaining = total_timeout - (time.monotonic() - started)
-                if remaining <= 0:
-                    cancel_event.set()
-                    overall_status = "timeout"
-                    for fut in pending:
-                        fut.cancel()
-                    # Wait for in-flight workers to notice cancel_event, then
-                    # prefer real task results over synthetic placeholders.
-                    done_late, still_pending = wait(
-                        pending, timeout=min(task_timeout + 5, 30)
-                    )
-                    for fut in done_late:
-                        task = futures[fut]
-                        try:
-                            result = fut.result()
-                        except Exception as exc:  # noqa: BLE001
-                            result = {
-                                "id": task.id,
-                                "role": task.role,
-                                "status": "error",
-                                "exit_code": None,
-                                "timed_out": False,
-                                "duration_sec": 0.0,
-                                "stdout": "",
-                                "stderr": "",
-                                "error": str(exc),
-                            }
-                        with lock:
-                            results[task.id] = result
-                    for fut in still_pending:
-                        task = futures[fut]
-                        with lock:
-                            if task.id not in results:
-                                results[task.id] = {
-                                    "id": task.id,
-                                    "role": task.role,
-                                    "status": "timeout",
-                                    "exit_code": None,
-                                    "timed_out": True,
-                                    "duration_sec": round(
-                                        time.monotonic() - started, 3
-                                    ),
-                                    "stdout": "",
-                                    "stderr": "",
-                                    "error": f"swarm exceeded {total_timeout}s",
-                                }
-                    break
-
-                done, pending = wait(
-                    pending, timeout=min(0.5, max(remaining, 0.01)), return_when=FIRST_COMPLETED
-                )
-                for fut in done:
-                    task = futures[fut]
-                    try:
-                        result = fut.result()
-                    except Exception as exc:  # noqa: BLE001 — surface as task error
-                        result = {
-                            "id": task.id,
-                            "role": task.role,
-                            "status": "error",
-                            "exit_code": None,
-                            "timed_out": False,
-                            "duration_sec": 0.0,
-                            "stdout": "",
-                            "stderr": "",
-                            "error": str(exc),
-                        }
-                    with lock:
-                        results[task.id] = result
-    finally:
-        signal.signal(signal.SIGINT, previous_int)
-        signal.signal(signal.SIGTERM, previous_term)
-
-    ordered = [results.get(task.id) or missing_result(task) for task in tasks]
-    if overall_status == "ok":
-        if any(r["status"] != "ok" for r in ordered):
-            overall_status = "partial"
-    return ordered, overall_status
-
-
-def missing_result(task: Task) -> dict[str, Any]:
-    return {
-        "id": task.id,
-        "role": task.role,
-        "status": "error",
-        "exit_code": None,
-        "timed_out": False,
-        "duration_sec": 0.0,
-        "stdout": "",
-        "stderr": "",
-        "error": "no result recorded",
-    }
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -420,7 +173,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--manifest",
         required=True,
         type=Path,
-        help="JSON file: array of tasks or {\"tasks\": [...]}",
+        help='JSON file: array of tasks or {"tasks": [...]}',
     )
     parser.add_argument(
         "--max-workers",
@@ -468,13 +221,13 @@ def main(argv: list[str] | None = None) -> int:
 
     ordered, overall_status = run_swarm(
         tasks=tasks,
-        bridge=bridge,
         max_workers=args.max_workers,
         task_timeout=args.task_timeout,
         total_timeout=args.total_timeout,
+        build_command=lambda task: build_command(bridge, task),
     )
 
-    envelope = {
+    envelope: dict[str, Any] = {
         "ok": overall_status == "ok",
         "status": overall_status,
         "max_workers": args.max_workers,
@@ -487,8 +240,6 @@ def main(argv: list[str] | None = None) -> int:
 
     if overall_status == "ok":
         return EXIT_OK
-    if overall_status in {"partial", "timeout", "cancelled"}:
-        return EXIT_PARTIAL
     return EXIT_PARTIAL
 
 

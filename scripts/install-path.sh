@@ -19,11 +19,14 @@ for arg in "$@"; do
 			cat <<'EOF'
 usage: sh scripts/install-path.sh [--force]
 
-  Installs:
+	Installs:
     ~/.local/bin/run-local-subagent
     ~/.local/bin/run-local-swarm
+    ~/.local/bin/run-small-subagent
+    ~/.local/bin/run-go-check-it-agents
     ~/.local/bin/setup-opencode
     ~/.config/opencode/agents/local-*.md
+    ~/.config/opencode/agents/small-*.md
   Merges the ollama/go-check-it-local model into ~/.config/opencode/opencode.json
   without removing existing providers/models.
 
@@ -74,6 +77,8 @@ install_link() {
 
 install_link "$script_dir/run-local-subagent.sh" "$bin_dir/run-local-subagent"
 install_link "$script_dir/run-local-swarm.py" "$bin_dir/run-local-swarm"
+install_link "$script_dir/run-small-subagent.sh" "$bin_dir/run-small-subagent"
+install_link "$script_dir/run-go-check-it-agents.py" "$bin_dir/run-go-check-it-agents"
 install_link "$script_dir/setup-opencode.sh" "$bin_dir/setup-opencode"
 
 for agent in \
@@ -81,7 +86,9 @@ for agent in \
 	local-go-test-designer \
 	local-crap-refactor \
 	local-patch-review \
-	local-project-scout
+	local-project-scout \
+	small-quality-worker \
+	small-go-check-it-orchestrator
 do
 	src="$repo_root/.opencode/agents/$agent.md"
 	dest="$agents_dir/$agent.md"
@@ -131,10 +138,13 @@ PY
 case ":$PATH:" in
 	*":$bin_dir:"*) ;;
 	*)
-		echo "note: $bin_dir is not on PATH; add it to use run-local-subagent, run-local-swarm, and setup-opencode" >&2
+		echo "note: $bin_dir is not on PATH; add it to use run-local-subagent, run-local-swarm, run-small-subagent, run-go-check-it-agents, and setup-opencode" >&2
 		;;
 esac
 
 echo "PATH tools ready. Create the Ollama alias with: setup-opencode"
 echo "Verify: command -v run-local-subagent && run-local-subagent --help"
 echo "Verify: command -v run-local-swarm && run-local-swarm --help"
+echo "Verify: command -v run-small-subagent && run-small-subagent --help"
+echo "Verify: command -v run-go-check-it-agents && run-go-check-it-agents --help"
+echo "Small-model pipeline requires: export GO_CHECK_IT_SMALL_MODEL=provider/model"
