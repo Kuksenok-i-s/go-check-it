@@ -57,4 +57,4 @@ else
 	exit 1
 fi
 
-"$go_check_it_bin" --explain --format=json --fail-on-findings
+"$go_check_it_bin" --format=agent-json --top=6 --fail-on-findings

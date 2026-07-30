@@ -27,7 +27,29 @@
           "local-go-test-designer": "allow",
           "local-crap-refactor": "allow",
           "local-patch-review": "allow",
-          "local-project-scout": "allow"
+          "local-project-scout": "allow",
+          "small-quality-worker": "allow",
+          "small-go-check-it-orchestrator": "allow"
+        }
+      }
+    },
+    "small-go-check-it-orchestrator": {
+      "permission": {
+        "task": {
+          "*": "deny",
+          "local-lint-diagnosis": "allow",
+          "local-go-test-designer": "allow",
+          "local-crap-refactor": "allow",
+          "local-patch-review": "allow",
+          "local-project-scout": "allow",
+          "small-quality-worker": "deny"
+        }
+      }
+    },
+    "small-quality-worker": {
+      "permission": {
+        "task": {
+          "*": "deny"
         }
       }
     }

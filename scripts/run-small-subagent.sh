@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# run-small-subagent.sh — IDE-neutral bridge to OpenCode small (non-local) agents.
+#
+# Every supported IDE (Cursor, VS Code, Claude Code, Codex, OpenCode) should
+# call this script instead of configuring a native cloud provider. It only
+# invokes allowlisted read-only agents and never applies edits.
+#
+# Requires GO_CHECK_IT_SMALL_MODEL=provider/model (for example
+# anthropic/claude-haiku-4-5). Credentials stay in the caller's OpenCode
+# configuration; this script never writes secrets.
+#
+# Runs in the caller's working directory (the project under review).
+
+set -euo pipefail
+
+ALLOWED_ROLES=(
+	small-quality-worker
+	small-go-check-it-orchestrator
+)
+
+usage() {
+	cat <<'EOF' >&2
+usage: run-small-subagent <role> [--file PATH] [--] [prompt...]
+
+Roles:
+  small-quality-worker
+  small-go-check-it-orchestrator
+
+Options:
+  --file PATH   Attach a context file (agent-json, worker results, etc.)
+  --            End of options; remaining args form the prompt
+
+Environment:
+  GO_CHECK_IT_SMALL_MODEL  Required. OpenCode model as provider/model
+  OPENCODE_BIN             Override the OpenCode executable path
+
+Install on PATH (once):
+  sh scripts/install-path.sh
+EOF
+	exit 2
+}
+
+role=${1:-}
+[[ -n "$role" ]] || usage
+if [[ "$role" == "-h" || "$role" == "--help" ]]; then
+	usage
+fi
+shift
+
+allowed=0
+for r in "${ALLOWED_ROLES[@]}"; do
+	if [[ "$role" == "$r" ]]; then
+		allowed=1
+		break
+	fi
+done
+if [[ "$allowed" -ne 1 ]]; then
+	echo "refusing unknown role: $role" >&2
+	usage
+fi
+
+files=()
+prompt_parts=()
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--file)
+			[[ $# -ge 2 ]] || usage
+			files+=("$2")
+			shift 2
+			;;
+		--)
+			shift
+			prompt_parts+=("$@")
+			break
+			;;
+		-h | --help)
+			usage
+			;;
+		*)
+			prompt_parts+=("$1")
+			shift
+			;;
+	esac
+done
+
+if [[ ${#prompt_parts[@]} -eq 0 && ${#files[@]} -eq 0 ]]; then
+	echo "a prompt or --file is required" >&2
+	usage
+fi
+
+for f in "${files[@]+"${files[@]}"}"; do
+	if [[ ! -f "$f" ]]; then
+		echo "context file not found: $f" >&2
+		exit 1
+	fi
+done
+
+model=${GO_CHECK_IT_SMALL_MODEL:-}
+if [[ -z "$model" ]]; then
+	echo "GO_CHECK_IT_SMALL_MODEL is required (provider/model)" >&2
+	echo "Example: export GO_CHECK_IT_SMALL_MODEL=anthropic/claude-haiku-4-5" >&2
+	exit 1
+fi
+if [[ "$model" != */* ]]; then
+	echo "GO_CHECK_IT_SMALL_MODEL must be provider/model, got: $model" >&2
+	exit 1
+fi
+
+resolve_opencode() {
+	if [[ -n "${OPENCODE_BIN:-}" ]]; then
+		echo "$OPENCODE_BIN"
+		return 0
+	fi
+	if command -v opencode >/dev/null 2>&1; then
+		command -v opencode
+		return 0
+	fi
+	if [[ -x "${HOME}/.opencode/bin/opencode" ]]; then
+		echo "${HOME}/.opencode/bin/opencode"
+		return 0
+	fi
+	return 1
+}
+
+if ! bin=$(resolve_opencode); then
+	echo "OpenCode is required but was not found on PATH" >&2
+	echo "Run: setup-opencode --install" >&2
+	echo "Docs: https://opencode.ai/docs/" >&2
+	exit 1
+fi
+
+prompt=$(printf '%s ' "${prompt_parts[@]+"${prompt_parts[@]}"}")
+prompt=${prompt%% }
+
+cmd=("$bin" run --agent "$role" --format json --model "$model")
+for f in "${files[@]+"${files[@]}"}"; do
+	cmd+=(--file "$f")
+done
+# Intentionally omit --auto: permissions stay deny-by-default on subagents.
+if [[ -n "$prompt" ]]; then
+	cmd+=("$prompt")
+fi
+
+exec "${cmd[@]}"

@@ -93,10 +93,11 @@ After cloning this repository:
 Invoke `/go-check-it` where slash skills are supported, or ask the agent to run
 the Go quality workflow.
 
-### Local Ollama subagents (shared by all IDEs)
+### Tiered small-model + local Ollama subagents (shared by all IDEs)
 
-Focused local-model help uses a shared OpenCode bridge. No IDE-specific Ollama
-provider or primary-model override is required.
+Focused model help uses shared OpenCode bridges. No IDE-specific primary-model
+override is required. Small non-local models do dirty analysis; the primary IDE
+model reviews a compact evidence packet and applies edits.
 
 ```sh
 # 1) Install host tools on PATH + OpenCode agents (once per machine)
@@ -108,15 +109,19 @@ setup-opencode
 # 3) Optional: launch / install OpenCode via Ollama (never installs Cursor)
 setup-opencode --install
 
-# 4) From any IDE agent, in any project, delegate one bounded task:
+# 4) Preferred: compact agent-json + tiered pipeline (requires OpenCode cloud model)
+export GO_CHECK_IT_SMALL_MODEL=provider/model   # e.g. anthropic/claude-haiku-4-5
+go-check-it --format=agent-json --top=6 --fail-on-findings > /tmp/agent.json || true
+run-go-check-it-agents --agent-json /tmp/agent.json --max-workers 2
+
+# 5) Fallback: local Ollama leaf for one bounded task
 run-local-subagent local-lint-diagnosis --file /tmp/diag.txt -- "smallest fix?"
 run-local-subagent local-go-test-designer --file internal/cliapp/args.go -- "tests for ParseArgs"
 run-local-subagent local-crap-refactor -- "reduce CRAP for the top function"
 run-local-subagent local-patch-review -- "review the current unstaged patch"
 run-local-subagent local-project-scout -- "scout entry points only"
 
-# 5) Optional: fan out independent scouts (opt-in; default 2 workers, hard max 4)
-#    Useful for 3+ orthogonal areas; skip for one cross-cutting bug or tiny repos.
+# 6) Optional: fan out independent local scouts (opt-in; default 2 workers, hard max 4)
 cat >/tmp/swarm-manifest.json <<'EOF'
 {
   "tasks": [
@@ -129,15 +134,16 @@ EOF
 run-local-swarm --manifest /tmp/swarm-manifest.json --max-workers 2
 ```
 
-Inside OpenCode you can also use `@local-lint-diagnosis`, `@local-go-test-designer`,
-`@local-crap-refactor`, `@local-patch-review`, or `@local-project-scout`. Local
-subagents are read-only; the primary IDE agent applies edits and must rerun
-`scripts/check.sh`. `run-local-swarm` only orchestrates allowlisted leaf calls
-and returns an ordered JSON envelope for the primary agent to synthesize.
+`run-go-check-it-agents` clusters up to 6 CRAP hotspot groups onto
+`small-quality-worker`, synthesizes results with
+`small-go-check-it-orchestrator`, and returns a validated evidence packet
+(without raw transcripts). Local/`small-*` subagents are read-only; the primary
+IDE agent applies edits, runs focused checks while iterating, and finishes with
+one full `scripts/check.sh`.
 
-Note: the `go-check-it-local` alias uses a 64K context; parallel workers multiply
-KV-cache memory. Start with `--max-workers 2` and raise only after checking
-`ollama ps` and wall-clock time.
+Note: the `go-check-it-local` alias uses a 64K context; parallel local workers
+multiply KV-cache memory. Start with `--max-workers 2` and raise only after
+checking `ollama ps` and wall-clock time.
 
 Details: [OPENCODE.md](.agents/skills/go-check-it/references/OPENCODE.md).
 
@@ -184,8 +190,11 @@ personal paths, verification, and official platform documentation.
 
 --explain             Print each practice finding's rationale, fix, and doc link
 --fail-on-findings    Exit non-zero if any practice finding is reported
---format=text|json    Output format (default text); JSON always includes the
-                      full explanation for every finding
+--format=text|json|agent-json
+                      Output format (default text). `json` is the full
+                      functions table; `agent-json` is a compact summary +
+                      hotspots for LLM agents (preferred in the skill loop)
+--top=N               Hotspot limit for agent-json (default 6)
 --max-workers N       Analyze up to N Go modules in parallel (default: half
                       the logical CPUs, at least 1). Caps at the number of
                       discovered modules. File discovery and practice checks
@@ -203,6 +212,7 @@ Examples:
 ./go-check-it internal/server/handler.go
 ./go-check-it internal/server internal/store
 ./go-check-it --explain internal/server
+./go-check-it --format=agent-json --top=6 --fail-on-findings
 ./go-check-it --format=json --fail-on-findings
 ./go-check-it --threshold=15
 ```
@@ -220,10 +230,11 @@ Examples:
 
 Alongside the CRAP score, go-check-it runs a curated set of `go/analysis`-shaped
 checks for Go best practices that CRAP doesn't capture, printed as a
-"Practice Findings" section (or under `"findings"` in `--format=json`).
-Each finding carries a structured explanation (why it matters, a concrete
-fix, and an official doc link) — shown with `--explain`, always present in
-JSON — so an agent reading the report can act on it without a side lookup.
+"Practice Findings" section (or under `"findings"` in `--format=json` /
+`--format=agent-json`). Each finding carries a structured explanation (why it
+matters, a concrete fix, and an official doc link) — shown with `--explain`,
+always present in JSON — so an agent reading the report can act on it without
+a side lookup.
 
 | Rule | What it flags |
 |------|---------------|

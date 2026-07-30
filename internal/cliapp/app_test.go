@@ -123,6 +123,12 @@ func TestExecute_HelpPrintsUsageAndExitsZero(t *testing.T) {
 	if !strings.Contains(stdout.String(), "--threshold") {
 		t.Fatalf("expected --threshold in usage, got %q", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "agent-json") {
+		t.Fatalf("expected agent-json in usage, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "--top") {
+		t.Fatalf("expected --top in usage, got %q", stdout.String())
+	}
 }
 
 func TestExecute_UsageErrorExitsOne(t *testing.T) {
@@ -215,6 +221,57 @@ func Risky(a, b, c int) int {
 	}
 	if !strings.Contains(stderr.String(), "CRAP threshold exceeded") {
 		t.Fatalf("expected threshold message, got %q", stderr.String())
+	}
+}
+
+func TestExecute_AgentJSONHotspotsAndExitTwo(t *testing.T) {
+	root := t.TempDir()
+	writeGoFile(t, filepath.Join(root, "go.mod"), "module m\n")
+	writeGoFile(t, filepath.Join(root, "risky.go"), `package m
+
+func Risky(a, b, c int) int {
+	if a > 0 && b > 0 {
+		if c > 0 {
+			return a + b + c
+		}
+		return a
+	}
+	for i := 0; i < a; i++ {
+		b += i
+	}
+	switch {
+	case b > 10:
+		return b
+	case b < 0:
+		return -b
+	default:
+		return 0
+	}
+}
+`)
+	writeGoFile(t, filepath.Join(root, "safe.go"), `package m
+
+func Safe() int { return 1 }
+`)
+
+	profile := filepath.Join(root, "cover.out")
+	writeGoFile(t, profile, "mode: set\nm/risky.go:4.30,18.2 8 0\nm/safe.go:3.18,3.27 1 1\n")
+
+	gen := &fakeCoverage{profilePath: profile}
+	app, stdout, stderr := newTestApp(t, root, gen)
+	code := app.Execute(context.Background(), []string{"--format=agent-json", "--top=1", "--fail-on-findings"})
+	if code != ExitThresholdExceeded {
+		t.Fatalf("expected exit 2, got %d (stdout: %s stderr: %s)", code, stdout.String(), stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, `"hotspots"`) || !strings.Contains(out, `"omitted"`) {
+		t.Fatalf("expected agent-json keys, got %q", out)
+	}
+	if !strings.Contains(out, "Risky") {
+		t.Fatalf("expected Risky hotspot, got %q", out)
+	}
+	if strings.Contains(out, `"functions"`) {
+		t.Fatalf("agent-json must not include full functions list: %q", out)
 	}
 }
 

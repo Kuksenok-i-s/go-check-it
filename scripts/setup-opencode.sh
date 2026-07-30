@@ -27,13 +27,14 @@ while [[ $# -gt 0 ]]; do
 			cat <<'EOF'
 usage: setup-opencode [--check|--install]
 
-  (default)  Select an installed Ollama model and create/update go-check-it-local
-             with a 64K context window for OpenCode subagents.
+  (default)  Auto-recommend an installed Ollama model, ask for confirmation,
+             then create/update go-check-it-local with a 64K context window.
   --check    Validate ollama, OpenCode, and the go-check-it-local alias only.
   --install  Run `ollama launch opencode` (may offer to install OpenCode).
 
 Environment:
-  GO_CHECK_IT_LOCAL_MODEL   Skip interactive selection; use this installed model.
+  GO_CHECK_IT_LOCAL_MODEL   Use this installed model (skips recommendation UI).
+  GO_CHECK_IT_CONFIRM=1     Accept the auto-recommendation without a TTY prompt.
   OLLAMA_HOST               Ollama API base (default http://localhost:11434).
 
 Install on PATH (once):
@@ -124,40 +125,221 @@ model_context_limit() {
 	echo "0"
 }
 
-select_model() {
-	if [[ -n "${GO_CHECK_IT_LOCAL_MODEL:-}" ]]; then
-		echo "$GO_CHECK_IT_LOCAL_MODEL"
+# Collect unique candidate models (skip the alias itself, embeddings, and
+# bare duplicates when a tagged form exists).
+candidate_models() {
+	local line base other other_base
+	local tagged=()
+	local bare=()
+	local out=()
+	while IFS= read -r line; do
+		[[ -n "$line" ]] || continue
+		base=${line%%:*}
+		[[ "$base" == "$ALIAS_NAME" || "$line" == "$ALIAS_NAME" ]] && continue
+		case "$line" in
+			*embed* | *Embed*) continue ;;
+		esac
+		if [[ "$line" == *:* ]]; then
+			tagged+=("$line")
+		else
+			bare+=("$line")
+		fi
+	done < <(list_models)
+	if [[ ${#tagged[@]} -gt 0 ]]; then
+		for line in "${tagged[@]}"; do
+			out+=("$line")
+		done
+	fi
+	if [[ ${#bare[@]} -gt 0 ]]; then
+		for line in "${bare[@]}"; do
+			local has_tagged=0
+			if [[ ${#tagged[@]} -gt 0 ]]; then
+				for other in "${tagged[@]}"; do
+					other_base=${other%%:*}
+					if [[ "$other_base" == "$line" ]]; then
+						has_tagged=1
+						break
+					fi
+				done
+			fi
+			[[ "$has_tagged" -eq 1 ]] && continue
+			out+=("$line")
+		done
+	fi
+	if [[ ${#out[@]} -eq 0 ]]; then
+		return 1
+	fi
+	printf '%s\n' "${out[@]}"
+}
+
+# Higher score is better. Prints: <score>\t<model>\t<reason>
+score_model() {
+	local model=$1
+	local ctx=$2
+	local score=0
+	local reasons=()
+	local lower
+	lower=$(printf '%s' "$model" | tr '[:upper:]' '[:lower:]')
+
+	if [[ "$ctx" != "0" && "$ctx" -lt "$MIN_CTX" ]]; then
+		# Disqualify models that advertise below OpenCode's minimum.
+		echo "-1000000	${model}	context ${ctx} < ${MIN_CTX}"
 		return 0
 	fi
+	if [[ "$ctx" != "0" && "$ctx" -ge "$MIN_CTX" ]]; then
+		score=$((score + 50))
+		reasons+=("context ${ctx}")
+	else
+		score=$((score + 10))
+		reasons+=("context unverified")
+	fi
+	case "$lower" in
+		*coder*)
+			score=$((score + 100))
+			reasons+=("coder model")
+			;;
+		*code*)
+			score=$((score + 60))
+			reasons+=("code-oriented name")
+			;;
+	esac
+	case "$lower" in
+		qwen*|gpt-oss*|gemma*|llama*|mistral*|deepseek*)
+			score=$((score + 15))
+			;;
+	esac
+	# Prefer smaller tagged sizes when the tag encodes a parameter count.
+	if [[ "$lower" =~ :([0-9]+(\.[0-9]+)?)b ]]; then
+		local params=${BASH_REMATCH[1]}
+		# Soft preference: ~7–14B for local specialists.
+		if awk -v p="$params" 'BEGIN { exit !(p >= 7 && p <= 14) }'; then
+			score=$((score + 25))
+			reasons+=("${params}B size band")
+		elif awk -v p="$params" 'BEGIN { exit !(p < 7) }'; then
+			score=$((score + 5))
+		else
+			# Large models still usable; slight penalty vs mid-size.
+			score=$((score - 5))
+			reasons+=("large ${params}B")
+		fi
+	fi
+	local reason
+	if [[ ${#reasons[@]} -eq 0 ]]; then
+		reason="installed candidate"
+	else
+		printf -v reason '%s, ' "${reasons[@]}"
+		reason=${reason%, }
+	fi
+	printf '%s\t%s\t%s\n' "$score" "$model" "$reason"
+}
+
+recommend_model() {
 	local models=()
 	local line
 	while IFS= read -r line; do
 		[[ -n "$line" ]] || continue
 		models+=("$line")
-	done < <(list_models)
+	done < <(candidate_models) || true
 	if [[ ${#models[@]} -eq 0 ]]; then
-		echo "No Ollama models are installed. Pull one first (e.g. ollama pull ...)." >&2
+		echo "No suitable Ollama models are installed. Pull a chat/code model first." >&2
+		echo "Embedding-only models and the go-check-it-local alias are ignored." >&2
 		exit 1
 	fi
-	if [[ ! -t 0 ]]; then
-		echo "No TTY for interactive selection. Set GO_CHECK_IT_LOCAL_MODEL." >&2
-		printf 'Installed models:\n' >&2
+
+	local best_score=-999999999
+	local best_model=""
+	local best_reason=""
+	local score model reason ctx ranked rest
+	local -a ranking=()
+	for model in "${models[@]}"; do
+		ctx=$(model_context_limit "$model")
+		ranked=$(score_model "$model" "$ctx")
+		score=${ranked%%$'\t'*}
+		rest=${ranked#*$'\t'}
+		model=${rest%%$'\t'*}
+		reason=${rest#*$'\t'}
+		ranking+=("$ranked")
+		if ((score > best_score)); then
+			best_score=$score
+			best_model=$model
+			best_reason=$reason
+		fi
+	done
+	if [[ -z "$best_model" || "$best_score" -le -1000000 ]]; then
+		echo "No installed model meets OpenCode's ${MIN_CTX} context minimum." >&2
+		printf 'Candidates:\n' >&2
 		printf '  %s\n' "${models[@]}" >&2
 		exit 1
 	fi
-	echo "Installed Ollama models:" >&2
-	local i=1
-	for line in "${models[@]}"; do
-		printf '  %2d) %s\n' "$i" "$line" >&2
-		i=$((i + 1))
+	RECOMMENDED_MODEL=$best_model
+	RECOMMENDED_REASON=$best_reason
+	RECOMMENDED_ALTERNATES=()
+	local entry alt_score alt_model
+	for entry in "${ranking[@]}"; do
+		alt_score=${entry%%$'\t'*}
+		rest=${entry#*$'\t'}
+		alt_model=${rest%%$'\t'*}
+		[[ "$alt_model" == "$best_model" ]] && continue
+		((alt_score > -1000000)) || continue
+		RECOMMENDED_ALTERNATES+=("$alt_model")
 	done
-	local choice
-	read -r -p "Select model number for go-check-it-local: " choice
-	if [[ ! "$choice" =~ ^[0-9]+$ ]] || ((choice < 1 || choice > ${#models[@]})); then
-		echo "Invalid selection" >&2
+}
+
+confirm_recommended_model() {
+	local recommended=$1
+	local reason=$2
+	shift 2
+	local alternates=("$@")
+
+	echo "Recommended local model: ${recommended}" >&2
+	echo "  reason: ${reason}" >&2
+	if [[ ${#alternates[@]} -gt 0 ]]; then
+		echo "Other installed candidates:" >&2
+		local alt
+		for alt in "${alternates[@]}"; do
+			printf '  - %s\n' "$alt" >&2
+		done
+	fi
+
+	if [[ "${GO_CHECK_IT_CONFIRM:-}" == "1" || "${GO_CHECK_IT_CONFIRM:-}" == "yes" ]]; then
+		echo "GO_CHECK_IT_CONFIRM set; accepting recommendation." >&2
+		echo "$recommended"
+		return 0
+	fi
+
+	if [[ ! -t 0 ]]; then
+		echo "Confirm the recommendation, then rerun:" >&2
+		echo "  GO_CHECK_IT_CONFIRM=1 setup-opencode" >&2
+		echo "Or pin an explicit model:" >&2
+		echo "  GO_CHECK_IT_LOCAL_MODEL=${recommended} setup-opencode" >&2
 		exit 1
 	fi
-	echo "${models[$((choice - 1))]}"
+
+	local reply
+	read -r -p "Use this model for go-check-it-local? [Y/n/model-name] " reply
+	if [[ -z "$reply" || "$reply" == "Y" || "$reply" == "y" || "$reply" == "yes" ]]; then
+		echo "$recommended"
+		return 0
+	fi
+	if [[ "$reply" == "n" || "$reply" == "N" || "$reply" == "no" ]]; then
+		echo "Aborted. Re-run and accept, or set GO_CHECK_IT_LOCAL_MODEL=<model>." >&2
+		exit 1
+	fi
+	# Treat any other input as an explicit installed model name.
+	echo "$reply"
+}
+
+select_model() {
+	if [[ -n "${GO_CHECK_IT_LOCAL_MODEL:-}" ]]; then
+		echo "$GO_CHECK_IT_LOCAL_MODEL"
+		return 0
+	fi
+	recommend_model
+	if [[ ${#RECOMMENDED_ALTERNATES[@]} -gt 0 ]]; then
+		confirm_recommended_model "$RECOMMENDED_MODEL" "$RECOMMENDED_REASON" "${RECOMMENDED_ALTERNATES[@]}"
+	else
+		confirm_recommended_model "$RECOMMENDED_MODEL" "$RECOMMENDED_REASON"
+	fi
 }
 
 model_installed() {

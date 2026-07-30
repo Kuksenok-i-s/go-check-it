@@ -102,6 +102,45 @@ func TestParseArgs_InvalidFormatErrors(t *testing.T) {
 	}
 }
 
+func TestParseArgs_AgentJSONAndTop(t *testing.T) {
+	got, err := ParseArgs([]string{"--format=agent-json", "--top=3", "--fail-on-findings"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Format != "agent-json" {
+		t.Fatalf("expected agent-json, got %q", got.Format)
+	}
+	if got.TopN != 3 {
+		t.Fatalf("expected TopN 3, got %d", got.TopN)
+	}
+	if !got.FailOnFindings || got.Mode != ModeAllSrc {
+		t.Fatalf("unexpected args: %+v", got)
+	}
+}
+
+func TestParseArgs_DefaultTopN(t *testing.T) {
+	got, err := ParseArgs(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.TopN != DefaultTopN {
+		t.Fatalf("expected default TopN %d, got %d", DefaultTopN, got.TopN)
+	}
+}
+
+func TestParseArgs_InvalidTopErrors(t *testing.T) {
+	for _, args := range [][]string{
+		{"--top=0"},
+		{"--top=-1"},
+		{"--top=abc"},
+	} {
+		_, err := ParseArgs(args)
+		if err == nil {
+			t.Fatalf("expected error for %v", args)
+		}
+	}
+}
+
 func TestParseArgs_MaxWorkersExplicit(t *testing.T) {
 	got, err := ParseArgs([]string{"--max-workers", "4", "--explain"})
 	if err != nil {
